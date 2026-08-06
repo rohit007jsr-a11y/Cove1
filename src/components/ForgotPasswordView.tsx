@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { Mail, ArrowLeft, Send, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { CoveLogo } from './CoveLogo';
-import { supabase } from '../lib/supabase';
+import { supabase, formatAuthError, isSupabaseConfigured } from '../lib/supabase';
 import { AuthView } from '../types';
 
 interface ForgotPasswordViewProps {
@@ -41,8 +41,9 @@ export const ForgotPasswordView: React.FC<ForgotPasswordViewProps> = ({
       showToast('success', 'Reset Link Sent', `Password reset instructions sent to ${email}`);
     } catch (err: any) {
       console.error('Password reset error:', err);
-      setErrorMessage(err.message || 'Failed to send reset link.');
-      showToast('error', 'Reset Failed', err.message || 'Could not process password reset.');
+      const formatted = formatAuthError(err);
+      setErrorMessage(formatted);
+      showToast('error', 'Reset Failed', formatted);
     } finally {
       setLoading(false);
     }
@@ -68,6 +69,18 @@ export const ForgotPasswordView: React.FC<ForgotPasswordViewProps> = ({
             Enter your email to receive a recovery link
           </p>
         </div>
+
+        {!isSupabaseConfigured && (
+          <div className="mb-6 p-3.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs flex flex-col gap-1">
+            <div className="flex items-center gap-2 font-semibold text-amber-900">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>Supabase Not Configured on Vercel</span>
+            </div>
+            <p className="text-[11px] text-amber-700 leading-normal pl-6">
+              To send password resets on Vercel, navigate to <strong>Project Settings &rarr; Environment Variables</strong> and add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>.
+            </p>
+          </div>
+        )}
 
         {sent ? (
           <div className="text-center space-y-4">

@@ -40,7 +40,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Helper to find or create a conversation between two users using database function
+  // Helper to find or create a conversation between two users using database function or client fallback
   const getOrCreateConversationId = async (
     myUserId: string,
     otherUserId: string,
@@ -49,7 +49,17 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     try {
       if (!myUserId || !otherUserId) return null;
 
-      // Ensure both user profiles exist in Supabase 'profiles' table first
+      const generateUUID = (): string => {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+          return crypto.randomUUID();
+        }
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+          const r = (Math.random() * 16) | 0;
+          return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+        });
+      };
+
+      // Ensure both user profiles exist in Supabase 'profiles' table first to prevent foreign key issues
       try {
         const profilesToUpsert = [
           {
@@ -76,16 +86,15 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         console.log('Notice upserting profiles:', pErr);
       }
 
-      // 1. Primary: Call database RPC function create_conversation
+      // 1. Primary: Try database RPC function create_conversation if available
       try {
         const { data, error } = await supabase.rpc('create_conversation', {
           other_user_id: otherUserId,
         });
 
         if (!error && data) {
-          if (typeof data === 'string') return data;
-          if (typeof data === 'object' && 'id' in data) return (data as any).id;
-          return String(data);
+          const rpcId = typeof data === 'string' ? data : (data as any)?.id ? String((data as any).id) : String(data);
+          if (rpcId && rpcId !== 'null' && !rpcId.startsWith('conv-')) return rpcId;
         } else if (error) {
           console.warn('create_conversation RPC notice:', error.message);
         }
@@ -93,7 +102,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         console.warn('create_conversation RPC exception:', rpcErr);
       }
 
-      // 2. Secondary fallback: direct participant search
+      // 2. Secondary: direct participant search in conversation_participants table
       try {
         const { data: myPart } = await supabase
           .from('conversation_participants')
@@ -109,7 +118,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             .eq('user_id', otherUserId)
             .limit(1);
 
-          if (shared && shared.length > 0) {
+          if (shared && shared.length > 0 && shared[0].conversation_id) {
             return shared[0].conversation_id;
           }
         }
@@ -117,11 +126,49 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         console.log('Notice checking participants:', pErr);
       }
 
-      // 3. Fallback: generate stable conversation ID string
-      return `conv-${[myUserId, otherUserId].sort().join('-')}`;
+      // 3. Fallback: Create a new conversation row directly in Supabase DB with a valid UUID
+      try {
+        const newConvId = generateUUID();
+        let finalConvId = newConvId;
+
+        const { error: convErr } = await supabase
+          .from('conversations')
+          .insert([{ id: newConvId }]);
+
+        if (convErr) {
+          console.warn('Notice inserting specified conv ID, trying auto insert:', convErr.message);
+          const { data: autoConv, error: autoErr } = await supabase
+            .from('conversations')
+            .insert({})
+            .select('id')
+            .single();
+
+          if (!autoErr && autoConv?.id) {
+            finalConvId = autoConv.id;
+          }
+        }
+
+        // Add both participants to conversation_participants table
+        const { error: partUpsertErr } = await supabase.from('conversation_participants').upsert([
+          { conversation_id: finalConvId, user_id: myUserId },
+          { conversation_id: finalConvId, user_id: otherUserId },
+        ], { onConflict: 'conversation_id,user_id' });
+
+        if (partUpsertErr) {
+          await supabase.from('conversation_participants').insert([
+            { conversation_id: finalConvId, user_id: myUserId },
+            { conversation_id: finalConvId, user_id: otherUserId },
+          ]);
+        }
+
+        return finalConvId;
+      } catch (createErr) {
+        console.error('Error creating new conversation in database:', createErr);
+        return generateUUID();
+      }
     } catch (err) {
       console.error('Error in getOrCreateConversationId:', err);
-      return `conv-${[myUserId, otherUserId].sort().join('-')}`;
+      return null;
     }
   };
 
@@ -311,6 +358,16 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     e.preventDefault();
     if (!newMessage.trim() || !selectedContact) return;
 
+    const generateUUID = (): string => {
+      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+      }
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+      });
+    };
+
     const otherUserId =
       selectedContact.requester_id === user.id
         ? (selectedContact.addressee_id || selectedContact.profile?.id)
@@ -319,7 +376,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     let convId = activeConversationId;
     if (!convId) {
       convId = await getOrCreateConversationId(user.id, otherUserId, selectedContact.profile);
-      setActiveConversationId(convId);
+      if (convId) setActiveConversationId(convId);
     }
 
     if (!convId) {
@@ -328,9 +385,11 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     }
 
     const messageText = newMessage.trim();
+    const messageId = generateUUID();
     const tempId = `temp-${Date.now()}`;
+
     const tempMessage: Message = {
-      id: tempId,
+      id: messageId,
       conversation_id: convId,
       sender_id: user.id,
       content: messageText,
@@ -345,6 +404,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         .from('messages')
         .insert([
           {
+            id: messageId,
             conversation_id: convId,
             sender_id: user.id,
             content: messageText,
@@ -355,44 +415,26 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
       if (!error && data) {
         setMessages((prev) =>
-          prev.map((msg) => (msg.id === tempId ? data : msg))
+          prev.map((msg) => (msg.id === messageId || msg.id === tempId ? data : msg))
         );
       } else {
         if (error) console.warn('Supabase message insert notice:', error.message);
         // Save fallback to localStorage so message persists in conversation
         const localKey = `cove_local_msgs_${convId}`;
         const existing: Message[] = JSON.parse(localStorage.getItem(localKey) || '[]');
-        const fallbackMsg: Message = {
-          id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-          conversation_id: convId,
-          sender_id: user.id,
-          content: messageText,
-          created_at: tempMessage.created_at,
-        };
-        existing.push(fallbackMsg);
-        localStorage.setItem(localKey, JSON.stringify(existing));
-
-        setMessages((prev) =>
-          prev.map((msg) => (msg.id === tempId ? fallbackMsg : msg))
-        );
+        if (!existing.some((m) => m.id === tempMessage.id)) {
+          existing.push(tempMessage);
+          localStorage.setItem(localKey, JSON.stringify(existing));
+        }
       }
     } catch (err: any) {
       console.error('Error sending message:', err);
       const localKey = `cove_local_msgs_${convId}`;
       const existing: Message[] = JSON.parse(localStorage.getItem(localKey) || '[]');
-      const fallbackMsg: Message = {
-        id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-        conversation_id: convId,
-        sender_id: user.id,
-        content: messageText,
-        created_at: tempMessage.created_at,
-      };
-      existing.push(fallbackMsg);
-      localStorage.setItem(localKey, JSON.stringify(existing));
-
-      setMessages((prev) =>
-        prev.map((msg) => (msg.id === tempId ? fallbackMsg : msg))
-      );
+      if (!existing.some((m) => m.id === tempMessage.id)) {
+        existing.push(tempMessage);
+        localStorage.setItem(localKey, JSON.stringify(existing));
+      }
     }
   };
 

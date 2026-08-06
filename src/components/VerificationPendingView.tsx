@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Mail, CheckCircle2, RefreshCw, ArrowLeft, Inbox, AlertCircle, Edit3 } from 'lucide-react';
 import { CoveLogo } from './CoveLogo';
-import { supabase } from '../lib/supabase';
+import { supabase, formatAuthError } from '../lib/supabase';
 import { AuthView } from '../types';
 
 interface VerificationPendingViewProps {
@@ -60,8 +60,9 @@ export const VerificationPendingView: React.FC<VerificationPendingViewProps> = (
       setResendCooldown(45); // 45 seconds cooldown
     } catch (err: any) {
       console.error('Resend email error:', err);
-      showToast('error', 'Resend Failed', err.message || 'Could not resend verification email.');
-      setStatusMessage(err.message || 'Error resending verification email. Try again shortly.');
+      const formatted = formatAuthError(err);
+      showToast('error', 'Resend Failed', formatted);
+      setStatusMessage(formatted);
     } finally {
       setIsResending(false);
     }

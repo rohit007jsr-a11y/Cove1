@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { Mail, Lock, Eye, EyeOff, LogIn, AlertCircle, Sparkles } from 'lucide-react';
 import { CoveLogo } from './CoveLogo';
-import { supabase } from '../lib/supabase';
+import { supabase, formatAuthError, isSupabaseConfigured } from '../lib/supabase';
 import { AuthView } from '../types';
 
 interface LoginViewProps {
@@ -69,8 +69,9 @@ export const LoginView: React.FC<LoginViewProps> = ({
       onLoginSuccess();
     } catch (err: any) {
       console.error('Login error:', err);
-      setErrorMessage(err.message || 'Invalid email or password.');
-      showToast('error', 'Login Failed', err.message || 'Invalid login credentials.');
+      const formatted = formatAuthError(err);
+      setErrorMessage(formatted);
+      showToast('error', 'Login Failed', formatted);
     } finally {
       setLoading(false);
     }
@@ -96,6 +97,18 @@ export const LoginView: React.FC<LoginViewProps> = ({
             Sign in to your Cove account
           </p>
         </div>
+
+        {!isSupabaseConfigured && (
+          <div className="mb-6 p-3.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs flex flex-col gap-1">
+            <div className="flex items-center gap-2 font-semibold text-amber-900">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>Supabase Not Configured on Vercel</span>
+            </div>
+            <p className="text-[11px] text-amber-700 leading-normal pl-6">
+              To log in on Vercel, navigate to <strong>Project Settings &rarr; Environment Variables</strong> and set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>.
+            </p>
+          </div>
+        )}
 
         {errorMessage && (
           <div className="mb-6 p-3.5 rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs flex items-center gap-2.5">
