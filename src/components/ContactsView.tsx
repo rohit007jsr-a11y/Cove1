@@ -1,0 +1,720 @@
+import React, { useState, useEffect } from 'react';
+import { motion } from 'motion/react';
+import {
+  Search,
+  UserPlus,
+  Check,
+  X,
+  Clock,
+  Users,
+  Mail,
+  AlertCircle,
+  RefreshCw,
+  Copy,
+  ArrowLeft
+} from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { UserProfile, Profile, ContactRequest } from '../types';
+
+interface ContactsViewProps {
+  user: UserProfile;
+  showToast: (type: 'success' | 'error' | 'info', title: string, message?: string) => void;
+  onBack?: () => void;
+  onSelectContact?: (contact: ContactRequest) => void;
+}
+
+const DEMO_PROFILES: Profile[] = [
+  {
+    id: '11111111-1111-4111-a111-111111111111',
+    email: 'alex@cove.app',
+    display_name: 'Alex Morgan',
+    created_at: new Date(Date.now() - 86400000 * 10).toISOString(),
+  },
+  {
+    id: '22222222-2222-4222-a222-222222222222',
+    email: 'maya@cove.app',
+    display_name: 'Maya Lin',
+    created_at: new Date(Date.now() - 86400000 * 5).toISOString(),
+  },
+  {
+    id: '33333333-3333-4333-a333-333333333333',
+    email: 'jordan@cove.app',
+    display_name: 'Jordan Vance',
+    created_at: new Date(Date.now() - 86400000 * 2).toISOString(),
+  },
+  {
+    id: '44444444-4444-4444-a444-444444444444',
+    email: 'rohit007jsr@gmail.com',
+    display_name: 'Rohit Kumar',
+    created_at: new Date(Date.now() - 86400000 * 15).toISOString(),
+  }
+];
+
+export const ContactsView: React.FC<ContactsViewProps> = ({
+  user,
+  showToast,
+  onBack,
+  onSelectContact,
+}) => {
+  const [searchEmail, setSearchEmail] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [foundProfile, setFoundProfile] = useState<Profile | null>(null);
+  const [hasSearched, setHasSearched] = useState(false);
+  
+  const [requests, setRequests] = useState<ContactRequest[]>([]);
+  const [loadingRequests, setLoadingRequests] = useState(true);
+  const [sendingRequest, setSendingRequest] = useState(false);
+  const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchRequests();
+  }, [user.id, user.email]);
+
+  const fetchRequests = async () => {
+    setLoadingRequests(true);
+    let loadedRequests: ContactRequest[] = [];
+
+    try {
+      // Query contacts table using requester_id or addressee_id
+      const { data, error } = await supabase
+        .from('contacts')
+        .select('*')
+        .or(`requester_id.eq.${user.id},addressee_id.eq.${user.id}`);
+
+      if (!error && data && Array.isArray(data)) {
+        // Collect other user IDs to query profiles
+        const otherUserIds = Array.from(
+          new Set(
+            data.map((item: any) =>
+              item.requester_id === user.id ? item.addressee_id : item.requester_id
+            )
+          )
+        ).filter(Boolean);
+
+        // Fetch profiles for all associated users
+        let profilesMap = new Map<string, Profile>();
+        if (otherUserIds.length > 0) {
+          try {
+            const { data: profs } = await supabase
+              .from('profiles')
+              .select('id, email, display_name, avatar_url, created_at')
+              .in('id', otherUserIds);
+
+            if (profs && Array.isArray(profs)) {
+              profs.forEach((p: any) => {
+                profilesMap.set(p.id, {
+                  id: p.id,
+                  email: p.email,
+                  display_name: p.display_name,
+                  avatar_url: p.avatar_url,
+                  created_at: p.created_at,
+                });
+              });
+            }
+          } catch (pe) {
+            console.log('Profiles query notice:', pe);
+          }
+        }
+
+        loadedRequests = data.map((item: any) => {
+          const otherId = item.requester_id === user.id ? item.addressee_id : item.requester_id;
+          let profile = profilesMap.get(otherId);
+
+          if (!profile) {
+            // Check demo profiles as fallback
+            const demo = DEMO_PROFILES.find((p) => p.id === otherId);
+            if (demo) {
+              profile = demo;
+            } else {
+              profile = {
+                id: otherId || 'unknown',
+                email: 'cove_user@cove.app',
+                display_name: 'Cove Member',
+              };
+            }
+          }
+
+          return {
+            id: item.id || `req-${Math.random()}`,
+            requester_id: item.requester_id,
+            addressee_id: item.addressee_id,
+            status: item.status || 'pending',
+            created_at: item.created_at || new Date().toISOString(),
+            profile,
+          };
+        });
+      }
+    } catch (err) {
+      console.log('Supabase fetch notice:', err);
+    }
+
+    // Local storage fallback for seamless offline testing
+    try {
+      const localStore = localStorage.getItem('cove_contact_requests_global');
+      if (localStore) {
+        const parsed = JSON.parse(localStore);
+        parsed.forEach((req: any) => {
+          const rId = req.requester_id;
+          const aId = req.addressee_id || req.recipient_id;
+          if (rId === user.id || aId === user.id) {
+            const existingIdx = loadedRequests.findIndex((e) => e.id === req.id);
+            if (existingIdx === -1) {
+              const otherId = rId === user.id ? aId : rId;
+              const demo = DEMO_PROFILES.find((p) => p.id === otherId || p.email === req.profile?.email);
+              loadedRequests.push({
+                id: req.id,
+                requester_id: rId,
+                addressee_id: aId,
+                status: req.status || 'pending',
+                created_at: req.created_at || new Date().toISOString(),
+                profile: req.profile || demo || {
+                  id: otherId,
+                  email: req.recipient_email || req.requester_email || 'user@cove.app',
+                  display_name: req.recipient_name || req.requester_name || 'Cove Member',
+                },
+              });
+            }
+          }
+        });
+      }
+    } catch (e) {
+      console.error('Error parsing local requests:', e);
+    }
+
+    setRequests(loadedRequests);
+    setLoadingRequests(false);
+  };
+
+  const saveLocalRequests = (updatedRequests: ContactRequest[]) => {
+    try {
+      const existingGlobal = localStorage.getItem('cove_contact_requests_global');
+      let globalList: ContactRequest[] = existingGlobal ? JSON.parse(existingGlobal) : [];
+
+      updatedRequests.forEach((updated) => {
+        const idx = globalList.findIndex((item) => item.id === updated.id);
+        if (idx >= 0) {
+          globalList[idx] = updated;
+        } else {
+          globalList.push(updated);
+        }
+      });
+
+      localStorage.setItem('cove_contact_requests_global', JSON.stringify(globalList));
+    } catch (err) {
+      console.error('Error saving local requests:', err);
+    }
+  };
+
+  const handleSearch = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const query = searchEmail.trim().toLowerCase();
+    
+    if (!query) {
+      showToast('info', 'Enter Email', 'Please type an email address to search.');
+      return;
+    }
+
+    if (user.email && query === user.email.toLowerCase()) {
+      showToast('error', 'Cannot Add Yourself', 'You cannot send a contact request to your own email address.');
+      setFoundProfile(null);
+      setHasSearched(true);
+      return;
+    }
+
+    setIsSearching(true);
+    setHasSearched(false);
+    setFoundProfile(null);
+
+    let match: Profile | null = null;
+
+    try {
+      // Query profiles by email
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, email, display_name, avatar_url, created_at')
+        .ilike('email', query)
+        .maybeSingle();
+
+      if (!error && data) {
+        match = {
+          id: data.id,
+          email: data.email,
+          display_name: data.display_name || data.email.split('@')[0],
+          avatar_url: data.avatar_url,
+          created_at: data.created_at,
+        };
+      }
+    } catch (err) {
+      console.log('Supabase profiles lookup notice:', err);
+    }
+
+    if (!match) {
+      const demoMatch = DEMO_PROFILES.find((p) => p.email.toLowerCase() === query);
+      if (demoMatch) {
+        match = demoMatch;
+      } else {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (emailRegex.test(query)) {
+          const namePart = query.split('@')[0];
+          const formattedName = namePart.charAt(0).toUpperCase() + namePart.slice(1);
+          const generateUUID = (): string => {
+            if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+              return crypto.randomUUID();
+            }
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+              const r = (Math.random() * 16) | 0;
+              return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+            });
+          };
+
+          match = {
+            id: generateUUID(),
+            email: query,
+            display_name: `${formattedName} (Cove Member)`,
+            created_at: new Date().toISOString(),
+          };
+        }
+      }
+    }
+
+    setFoundProfile(match);
+    setHasSearched(true);
+    setIsSearching(false);
+  };
+
+  const handleSendRequest = async (targetProfile: Profile) => {
+    if (!targetProfile) return;
+
+    const existing = requests.find(
+      (r) =>
+        (r.requester_id === user.id && r.addressee_id === targetProfile.id) ||
+        (r.addressee_id === user.id && r.requester_id === targetProfile.id) ||
+        (r.profile?.email?.toLowerCase() === targetProfile.email.toLowerCase())
+    );
+
+    if (existing) {
+      if (existing.status === 'accepted') {
+        showToast('info', 'Already Connected', `${targetProfile.email} is already in your contacts.`);
+      } else if (existing.status === 'pending') {
+        showToast('info', 'Request Pending', `A contact request with ${targetProfile.email} is already pending.`);
+      } else {
+        showToast('info', 'Request Status', `A previous request status is ${existing.status}.`);
+      }
+      return;
+    }
+
+    setSendingRequest(true);
+
+    try {
+      // Ensure target profile and user profile exist in profiles table
+      await supabase.from('profiles').upsert([
+        {
+          id: targetProfile.id,
+          email: targetProfile.email,
+          display_name: targetProfile.display_name || targetProfile.email.split('@')[0],
+        },
+        {
+          id: user.id,
+          email: user.email,
+          display_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Cove Member',
+        }
+      ], { onConflict: 'id' });
+    } catch (pe) {
+      console.log('Notice upserting profiles before contact insert:', pe);
+    }
+
+    const newRequest: ContactRequest = {
+      id: `req-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      requester_id: user.id,
+      addressee_id: targetProfile.id,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+      profile: targetProfile,
+    };
+
+    try {
+      // Insert into contacts table using requester_id and addressee_id
+      const { error } = await supabase.from('contacts').insert([
+        {
+          requester_id: user.id,
+          addressee_id: targetProfile.id,
+          status: 'pending',
+        },
+      ]);
+
+      if (error) {
+        console.log('Supabase contact insert notice:', error.message);
+      }
+    } catch (err) {
+      console.log('Supabase error inserting contact:', err);
+    }
+
+    const updated = [newRequest, ...requests];
+    setRequests(updated);
+    saveLocalRequests(updated);
+
+    setSendingRequest(false);
+    showToast('success', 'Request Sent!', `Contact request sent to ${targetProfile.email}`);
+  };
+
+  const handleUpdateRequestStatus = async (requestId: string, newStatus: 'accepted' | 'blocked') => {
+    try {
+      await supabase
+        .from('contacts')
+        .update({ status: newStatus })
+        .eq('id', requestId);
+    } catch (err) {
+      console.log('Supabase status update notice:', err);
+    }
+
+    const updated = requests.map((req) => (req.id === requestId ? { ...req, status: newStatus } : req));
+    setRequests(updated);
+    saveLocalRequests(updated);
+
+    if (newStatus === 'accepted') {
+      showToast('success', 'Contact Accepted', 'You have accepted the contact request.');
+    } else {
+      showToast('info', 'Request Updated', 'You have updated the contact request.');
+    }
+  };
+
+  const handleCopyEmail = (email: string) => {
+    navigator.clipboard.writeText(email);
+    setCopiedEmail(email);
+    showToast('info', 'Copied to Clipboard', email);
+    setTimeout(() => setCopiedEmail(null), 2000);
+  };
+
+  const incomingPending = requests.filter(
+    (r) => r.status === 'pending' && r.addressee_id === user.id
+  );
+
+  const outgoingPending = requests.filter(
+    (r) => r.status === 'pending' && r.requester_id === user.id
+  );
+
+  const acceptedContacts = requests.filter((r) => r.status === 'accepted');
+
+  return (
+    <div className="flex flex-col h-full bg-white select-none">
+      {/* Sidebar Header */}
+      <div className="px-4 py-4 bg-[#F7FAFC] border-b border-[#E2E8F0] flex items-center gap-3 shrink-0">
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="p-1 hover:bg-slate-200 text-[#64748B] hover:text-[#0F172A] rounded-full transition-colors"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+        )}
+        <div className="flex-1">
+          <h2 className="text-base font-bold text-[#0F172A] flex items-center gap-2">
+            <Users className="w-5 h-5 text-[#0EA5E9]" strokeWidth={2.5} />
+            Find & Add Contacts
+          </h2>
+        </div>
+        <button
+          onClick={fetchRequests}
+          className="p-1.5 hover:bg-slate-200 rounded-full text-[#64748B] hover:text-[#0EA5E9] transition-colors"
+          title="Refresh requests"
+        >
+          <RefreshCw className={`w-4 h-4 ${loadingRequests ? 'animate-spin text-[#0EA5E9]' : ''}`} />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 space-y-5">
+        {/* Profile Search Section */}
+        <div className="bg-white border border-[#E2E8F0] rounded-[10px] p-4 shadow-sm space-y-3">
+          <h3 className="font-semibold text-xs text-[#0F172A] uppercase tracking-wider flex items-center gap-1.5">
+            <Search className="w-3.5 h-3.5 text-[#0EA5E9]" />
+            Search Directory
+          </h3>
+
+          <form onSubmit={handleSearch} className="space-y-2">
+            <div className="relative">
+              <Mail className="w-4 h-4 text-[#64748B] absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="email"
+                value={searchEmail}
+                onChange={(e) => setSearchEmail(e.target.value)}
+                placeholder="Search email e.g. alex@cove.app"
+                className="w-full pl-9 pr-3 py-2 bg-white border border-[#E2E8F0] rounded-lg text-xs text-[#0F172A] placeholder-[#64748B] focus:outline-none focus:border-[#0EA5E9] focus:ring-1 focus:ring-[#0EA5E9] transition-all font-sans"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isSearching || !searchEmail.trim()}
+              className="w-full py-2 bg-[#0EA5E9] hover:bg-[#0284C7] disabled:opacity-50 text-white font-semibold text-xs rounded-lg transition-all flex items-center justify-center gap-2"
+            >
+              {isSearching ? (
+                <>
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                  <span>Searching...</span>
+                </>
+              ) : (
+                <>
+                  <Search className="w-3.5 h-3.5" />
+                  <span>Find User</span>
+                </>
+              )}
+            </button>
+          </form>
+
+          {/* Quick Demo Suggestions */}
+          <div className="pt-2 border-t border-[#E2E8F0]">
+            <span className="text-[10px] text-[#64748B] block mb-1.5 uppercase font-semibold tracking-wider">
+              Quick Test Profiles:
+            </span>
+            <div className="flex flex-col gap-1">
+              {DEMO_PROFILES.filter((p) => p.email !== user.email).map((demo) => (
+                <button
+                  key={demo.id}
+                  onClick={() => {
+                    setSearchEmail(demo.email);
+                    setFoundProfile(demo);
+                    setHasSearched(true);
+                  }}
+                  className="px-2.5 py-1.5 bg-[#F7FAFC] hover:bg-[#E2E8F0] border border-[#E2E8F0] text-left text-xs font-semibold text-[#0F172A] rounded-lg transition-colors flex items-center justify-between"
+                >
+                  <span className="truncate">{demo.display_name}</span>
+                  <span className="text-[10px] text-[#64748B] font-mono font-normal">{demo.email}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Search result */}
+          {hasSearched && (
+            <div className="pt-2 border-t border-[#E2E8F0]">
+              {foundProfile ? (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="p-3 bg-sky-50/50 border border-sky-100 rounded-lg space-y-2.5"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-[#0EA5E9] text-white font-bold text-xs flex items-center justify-center shrink-0">
+                      {foundProfile.email.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="overflow-hidden">
+                      <h4 className="font-semibold text-[#0F172A] text-xs truncate">
+                        {foundProfile.display_name || 'Cove Member'}
+                      </h4>
+                      <p className="text-[10px] text-[#64748B] font-mono truncate">
+                        {foundProfile.email}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => handleSendRequest(foundProfile)}
+                    disabled={sendingRequest}
+                    className="w-full py-1.5 bg-[#0EA5E9] hover:bg-[#0284C7] disabled:opacity-50 text-white font-semibold text-xs rounded-lg transition-all flex items-center justify-center gap-1.5"
+                  >
+                    {sendingRequest ? (
+                      <>
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                        <span>Sending Request...</span>
+                      </>
+                    ) : (
+                      <>
+                        <UserPlus className="w-3.5 h-3.5" />
+                        <span>Add Contact</span>
+                      </>
+                    )}
+                  </button>
+                </motion.div>
+              ) : (
+                <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg text-center space-y-1">
+                  <AlertCircle className="w-4 h-4 text-amber-500 mx-auto" />
+                  <p className="text-xs font-semibold text-amber-800">No profile found</p>
+                  <p className="text-[10px] text-amber-700">
+                    "{searchEmail}" doesn't exist yet. We will invite them when you send a request.
+                  </p>
+                  <button
+                    onClick={() => {
+                      const namePart = searchEmail.split('@')[0];
+                      const formattedName = namePart.charAt(0).toUpperCase() + namePart.slice(1);
+                      handleSendRequest({
+                        id: `user-${searchEmail.replace(/[^a-z0-9]/gi, '_')}`,
+                        email: searchEmail,
+                        display_name: formattedName,
+                        created_at: new Date().toISOString(),
+                      });
+                    }}
+                    className="mt-2 w-full py-1 bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold rounded-lg"
+                  >
+                    Force Add anyway
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Incoming requests (Received) */}
+        {incomingPending.length > 0 && (
+          <div className="space-y-2">
+            <h3 className="text-xs font-bold text-[#0F172A] uppercase tracking-wider flex items-center justify-between">
+              <span>Received Requests</span>
+              <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px]">
+                {incomingPending.length}
+              </span>
+            </h3>
+
+            <div className="space-y-2">
+              {incomingPending.map((req) => {
+                const p = req.profile;
+                const contactName = p?.display_name || p?.email?.split('@')[0] || 'Cove Member';
+                const contactEmail = p?.email || 'user@cove.app';
+
+                return (
+                  <div
+                    key={req.id}
+                    className="p-3 bg-[#F7FAFC] border border-[#E2E8F0] rounded-lg flex flex-col gap-2.5"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-[#0F172A] text-white font-bold text-xs flex items-center justify-center shrink-0">
+                        {contactName.slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="overflow-hidden flex-1">
+                        <div className="font-bold text-[#0F172A] text-xs truncate">
+                          {contactName}
+                        </div>
+                        <div className="text-[10px] text-[#64748B] font-mono truncate">
+                          {contactEmail}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleUpdateRequestStatus(req.id, 'accepted')}
+                        className="flex-1 py-1 px-2.5 bg-[#22C55E] hover:bg-emerald-600 text-white font-semibold rounded-md text-xs transition-colors flex items-center justify-center gap-1"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Accept</span>
+                      </button>
+                      <button
+                        onClick={() => handleUpdateRequestStatus(req.id, 'blocked')}
+                        className="py-1 px-2.5 bg-slate-100 hover:bg-slate-200 text-[#0F172A] font-semibold rounded-md text-xs transition-colors flex items-center justify-center gap-1"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        <span>Decline</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Sent requests (Outgoing) */}
+        {outgoingPending.length > 0 && (
+          <div className="space-y-2">
+            <h3 className="text-xs font-bold text-[#0F172A] uppercase tracking-wider">
+              Sent Requests ({outgoingPending.length})
+            </h3>
+            <div className="space-y-1.5">
+              {outgoingPending.map((req) => {
+                const p = req.profile;
+                const contactName = p?.display_name || p?.email?.split('@')[0] || 'Cove Member';
+                const contactEmail = p?.email || 'user@cove.app';
+
+                return (
+                  <div
+                    key={req.id}
+                    className="p-3 bg-white border border-[#E2E8F0] rounded-lg flex items-center justify-between gap-2"
+                  >
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      <div className="w-8 h-8 rounded-full bg-[#F7FAFC] border border-[#E2E8F0] text-[#64748B] font-bold text-xs flex items-center justify-center shrink-0">
+                        {contactName.slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="overflow-hidden">
+                        <div className="font-bold text-[#0F172A] text-xs truncate">
+                          {contactName}
+                        </div>
+                        <div className="text-[10px] text-[#64748B] truncate">
+                          {contactEmail}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100 text-[9px] font-semibold flex items-center gap-0.5 shrink-0">
+                      <Clock className="w-2.5 h-2.5" />
+                      Pending
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Contacts List */}
+        <div className="space-y-2">
+          <h3 className="text-xs font-bold text-[#0F172A] uppercase tracking-wider flex items-center justify-between">
+            <span>My Contacts ({acceptedContacts.length})</span>
+          </h3>
+
+          {acceptedContacts.length === 0 ? (
+            <div className="p-4 bg-slate-50 rounded-lg text-center border border-[#E2E8F0] space-y-1">
+              <Users className="w-6 h-6 text-[#64748B] mx-auto" />
+              <p className="text-xs font-bold text-[#0F172A]">No contacts yet</p>
+              <p className="text-[10px] text-[#64748B]">
+                Type an email address in the search box above to connect with other Cove members.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {acceptedContacts.map((contact) => {
+                const p = contact.profile;
+                const contactEmail = p?.email || 'user@cove.app';
+                const contactName = p?.display_name || p?.email?.split('@')[0] || 'Cove Member';
+
+                return (
+                  <div
+                    key={contact.id}
+                    onClick={() => onSelectContact && onSelectContact(contact)}
+                    className="p-2.5 bg-white border border-[#E2E8F0] hover:border-[#0EA5E9] rounded-lg flex items-center justify-between gap-2 transition-all cursor-pointer hover:bg-slate-50 group"
+                  >
+                    <div className="flex items-center gap-2.5 overflow-hidden">
+                      <div className="w-8 h-8 rounded-full bg-[#0EA5E9]/10 text-[#0EA5E9] font-bold text-xs flex items-center justify-center shrink-0">
+                        {contactName.slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="overflow-hidden">
+                        <h4 className="font-bold text-[#0F172A] text-xs truncate group-hover:text-[#0EA5E9] transition-colors">
+                          {contactName}
+                        </h4>
+                        <p className="text-[10px] text-[#64748B] truncate">
+                          {contactEmail}
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCopyEmail(contactEmail);
+                      }}
+                      className="p-1 hover:bg-slate-200 text-[#64748B] hover:text-[#0F172A] rounded transition-colors shrink-0"
+                      title="Copy email"
+                    >
+                      {copiedEmail === contactEmail ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-500" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
