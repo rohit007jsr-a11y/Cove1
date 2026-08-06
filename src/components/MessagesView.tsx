@@ -11,7 +11,8 @@ import {
   Users,
   ShieldCheck,
   Inbox,
-  RefreshCw
+  RefreshCw,
+  X
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { UserProfile, ContactRequest, Message, Profile } from '../types';
@@ -417,12 +418,12 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   });
 
   return (
-    <div className="w-full max-w-6xl mx-auto h-[calc(100vh-100px)] sm:h-[calc(100vh-140px)] min-h-[500px] bg-white rounded-xl border border-[#E2E8F0] shadow-md flex overflow-hidden">
+    <div className="w-full h-screen min-h-[100dvh] bg-white flex overflow-hidden select-none font-sans">
       {/* 1. Left Sidebar Panel */}
       <div
         className={`${
           selectedContact ? 'hidden md:flex' : 'flex'
-        } flex-col w-full md:w-[380px] border-r border-[#E2E8F0] bg-[#F7FAFC] shrink-0 h-full overflow-hidden`}
+        } flex-col w-full md:w-[340px] lg:w-[380px] border-r border-slate-200 bg-slate-50/70 shrink-0 h-full overflow-hidden`}
       >
         <AnimatePresence mode="wait">
           {sidebarView === 'chats' && (
@@ -433,46 +434,46 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               exit={{ opacity: 0, x: -10 }}
               className="flex flex-col h-full"
             >
-              {/* Sidebar Header */}
-              <div className="p-4 border-b border-[#E2E8F0] bg-white flex items-center justify-between shrink-0">
-                {/* User Info & Avatar */}
+              {/* Sidebar Top Header */}
+              <div className="px-4 py-3.5 border-b border-slate-200 bg-white flex items-center justify-between shrink-0 shadow-2xs">
+                {/* Logo & User info */}
                 <div className="flex items-center gap-3 overflow-hidden">
-                  <div className="relative">
-                    <div className="w-10 h-10 rounded-full bg-[#0EA5E9] text-white font-bold text-sm flex items-center justify-center shrink-0">
+                  <div className="relative shrink-0">
+                    <div className="w-9 h-9 rounded-full bg-sky-500 text-white font-bold text-xs flex items-center justify-center shadow-xs">
                       {(user.user_metadata?.full_name || user.email || 'U').slice(0, 2).toUpperCase()}
                     </div>
-                    {/* Verified online badge */}
-                    <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-[#22C55E] rounded-full border-2 border-white" title="Verified Online" />
+                    <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white" title="Verified Session" />
                   </div>
                   <div className="overflow-hidden">
-                    <h2 className="font-bold text-sm text-[#0F172A] truncate leading-tight">
-                      {user.user_metadata?.full_name || 'Cove Member'}
+                    <h2 className="font-bold text-sm text-slate-900 truncate leading-tight">
+                      {user.user_metadata?.full_name || user.email?.split('@')[0] || 'Cove Member'}
                     </h2>
-                    <span className="text-[10px] text-[#64748B] flex items-center gap-1 font-semibold truncate uppercase tracking-wider">
-                      Verified Account
+                    <span className="text-[10px] text-slate-500 font-medium truncate flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                      Active Session
                     </span>
                   </div>
                 </div>
 
-                {/* Header Action Buttons */}
+                {/* Header Action Tools */}
                 <div className="flex items-center gap-1 shrink-0">
                   <button
                     onClick={() => setSidebarView('contacts')}
-                    className="p-2 hover:bg-slate-100 rounded-full text-[#64748B] hover:text-[#0EA5E9] transition-colors"
+                    className="p-2 hover:bg-slate-100 rounded-full text-slate-600 hover:text-sky-600 transition-colors relative"
                     title="Find Contacts & Directory"
                   >
-                    <Users className="w-5 h-5" />
+                    <Users className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => setSidebarView('session')}
-                    className="p-2 hover:bg-slate-100 rounded-full text-[#64748B] hover:text-[#0EA5E9] transition-colors"
+                    className="p-2 hover:bg-slate-100 rounded-full text-slate-600 hover:text-sky-600 transition-colors"
                     title="Session Inspector"
                   >
-                    <Key className="w-5 h-5" />
+                    <Key className="w-4 h-4" />
                   </button>
                   <button
                     onClick={onSignOut}
-                    className="p-2 hover:bg-red-50 rounded-full text-[#64748B] hover:text-red-500 transition-colors"
+                    className="p-2 hover:bg-rose-50 rounded-full text-slate-500 hover:text-rose-600 transition-colors"
                     title="Sign Out"
                   >
                     <LogOut className="w-4 h-4" />
@@ -481,33 +482,46 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               </div>
 
               {/* Chat Search Bar */}
-              <div className="p-3 bg-white border-b border-[#E2E8F0] shrink-0">
+              <div className="p-3 bg-white border-b border-slate-200 shrink-0">
                 <div className="relative">
-                  <Search className="w-4 h-4 text-[#64748B] absolute left-3 top-1/2 -translate-y-1/2" />
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search or start a new chat..."
-                    className="w-full pl-9 pr-4 py-1.5 bg-[#F7FAFC] border border-[#E2E8F0] rounded-lg text-xs text-[#0F172A] placeholder-[#64748B] focus:outline-none focus:border-[#0EA5E9] focus:ring-1 focus:ring-[#0EA5E9] transition-all"
+                    placeholder="Search messages or contacts..."
+                    className="w-full pl-9 pr-8 py-2 bg-slate-100/80 border border-transparent hover:bg-slate-100 focus:bg-white border-slate-200/60 focus:border-sky-500 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500/20 transition-all font-sans"
                   />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
 
               {/* Active Conversations List */}
-              <div className="flex-1 overflow-y-auto p-2 space-y-1 bg-white">
+              <div className="flex-1 overflow-y-auto p-2 space-y-1 bg-slate-50/50">
                 {filteredContacts.length === 0 ? (
-                  <div className="p-6 text-center space-y-2">
-                    <Inbox className="w-8 h-8 text-[#64748B] mx-auto opacity-40" />
-                    <p className="text-xs font-bold text-[#0F172A]">No active conversations</p>
-                    <p className="text-[11px] text-[#64748B] max-w-[200px] mx-auto">
-                      Click the search icon in the header to find users and start a chat!
-                    </p>
+                  <div className="p-8 text-center space-y-3 my-auto">
+                    <div className="w-12 h-12 rounded-full bg-sky-50 border border-sky-100 text-sky-500 flex items-center justify-center mx-auto">
+                      <Inbox className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-800">No active chats</p>
+                      <p className="text-[11px] text-slate-500 mt-1 max-w-[220px] mx-auto leading-relaxed">
+                        Connect with friends using their email address from the Cove Directory.
+                      </p>
+                    </div>
                     <button
                       onClick={() => setSidebarView('contacts')}
-                      className="mt-2 text-xs text-[#0EA5E9] font-bold hover:underline"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sky-500 hover:bg-sky-600 text-white font-semibold text-xs rounded-lg transition-colors shadow-xs"
                     >
-                      Open Directory
+                      <Users className="w-3.5 h-3.5" />
+                      <span>Find & Add Contacts</span>
                     </button>
                   </div>
                 ) : (
@@ -520,20 +534,25 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                           setSelectedContact(contact);
                           setSidebarView('chats');
                         }}
-                        className={`w-full text-left p-3 rounded-lg transition-all flex items-center gap-3 border ${
+                        className={`w-full text-left p-3 rounded-xl transition-all flex items-center gap-3 border ${
                           isSelected
-                            ? 'bg-[#F7FAFC] border-[#0EA5E9]'
-                            : 'hover:bg-slate-50 border-transparent'
+                            ? 'bg-white border-sky-500/30 shadow-xs text-slate-900'
+                            : 'hover:bg-white/80 border-transparent text-slate-700'
                         }`}
                       >
-                        <div className="w-10 h-10 rounded-full bg-[#0EA5E9]/10 text-[#0EA5E9] font-bold text-sm flex items-center justify-center shrink-0">
+                        <div className="w-10 h-10 rounded-full bg-sky-500/10 text-sky-600 font-bold text-sm flex items-center justify-center shrink-0 border border-sky-500/20">
                           {getContactInitials(contact)}
                         </div>
                         <div className="overflow-hidden flex-1">
-                          <div className="font-bold text-[#0F172A] text-xs truncate">
-                            {getContactName(contact)}
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="font-bold text-xs truncate text-slate-900">
+                              {getContactName(contact)}
+                            </span>
+                            <span className="text-[9px] text-slate-400 font-medium shrink-0">
+                              Active
+                            </span>
                           </div>
-                          <p className="text-[10px] text-[#64748B] truncate mt-0.5">
+                          <p className="text-[11px] text-slate-500 truncate mt-0.5">
                             {getContactEmail(contact)}
                           </p>
                         </div>
@@ -574,56 +593,56 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               className="flex flex-col h-full bg-white"
             >
               {/* Header */}
-              <div className="px-4 py-4 bg-[#F7FAFC] border-b border-[#E2E8F0] flex items-center gap-3 shrink-0">
+              <div className="px-4 py-3.5 bg-slate-50 border-b border-slate-200 flex items-center gap-3 shrink-0">
                 <button
                   onClick={() => setSidebarView('chats')}
-                  className="p-1 hover:bg-slate-200 text-[#64748B] hover:text-[#0F172A] rounded-full transition-colors"
+                  className="p-1.5 hover:bg-slate-200 text-slate-600 hover:text-slate-900 rounded-full transition-colors"
                 >
-                  <ArrowLeft className="w-5 h-5" />
+                  <ArrowLeft className="w-4 h-4" />
                 </button>
                 <div className="flex-1">
-                  <h2 className="text-base font-bold text-[#0F172A] flex items-center gap-2">
-                    <Key className="w-5 h-5 text-[#0EA5E9]" strokeWidth={2.5} />
-                    Session Inspector
+                  <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <Key className="w-4 h-4 text-sky-500" strokeWidth={2.5} />
+                    Session Details
                   </h2>
                 </div>
               </div>
 
-              {/* Session contents */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs font-sans">
-                <div className="p-3 bg-slate-50 border border-[#E2E8F0] rounded-lg">
-                  <h3 className="font-semibold text-[10px] text-[#64748B] uppercase tracking-wide mb-1.5">
-                    User UUID
+              {/* Session details */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 text-xs font-sans">
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                  <h3 className="font-semibold text-[10px] text-slate-400 uppercase tracking-wider">
+                    User ID
                   </h3>
-                  <p className="font-mono text-[#0F172A] break-all select-all font-semibold">
+                  <p className="font-mono text-slate-800 break-all select-all font-semibold text-[11px]">
                     {user.id}
                   </p>
                 </div>
 
-                <div className="p-3 bg-slate-50 border border-[#E2E8F0] rounded-lg">
-                  <h3 className="font-semibold text-[10px] text-[#64748B] uppercase tracking-wide mb-1.5">
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                  <h3 className="font-semibold text-[10px] text-slate-400 uppercase tracking-wider">
                     Verified Email
                   </h3>
-                  <p className="font-mono text-[#0F172A] break-all select-all font-semibold">
+                  <p className="font-mono text-slate-800 break-all select-all font-semibold text-[11px]">
                     {user.email}
                   </p>
                 </div>
 
-                <div className="p-3 bg-slate-50 border border-[#E2E8F0] rounded-lg">
-                  <h3 className="font-semibold text-[10px] text-[#64748B] uppercase tracking-wide mb-1.5">
-                    Security Provider
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                  <h3 className="font-semibold text-[10px] text-slate-400 uppercase tracking-wider">
+                    Auth Security
                   </h3>
-                  <p className="text-[#0F172A] font-semibold flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-[#22C55E]" strokeWidth={2.5} />
+                  <p className="text-slate-800 font-semibold flex items-center gap-1.5 text-xs">
+                    <ShieldCheck className="w-4 h-4 text-emerald-500" strokeWidth={2.5} />
                     Supabase OAuth / JWT
                   </p>
                 </div>
 
-                <div className="p-3 bg-slate-50 border border-[#E2E8F0] rounded-lg">
-                  <h3 className="font-semibold text-[10px] text-[#64748B] uppercase tracking-wide mb-1.5">
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                  <h3 className="font-semibold text-[10px] text-slate-400 uppercase tracking-wider">
                     Last Session Sync
                   </h3>
-                  <p className="text-[#0F172A] font-mono">
+                  <p className="text-slate-700 font-mono text-[11px]">
                     {user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString() : 'Just now'}
                   </p>
                 </div>
@@ -641,45 +660,52 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       >
         {selectedContact ? (
           <div className="flex flex-col h-full overflow-hidden">
-            {/* Active Contact Header */}
-            <div className="p-4 border-b border-[#E2E8F0] bg-[#F7FAFC] flex items-center justify-between shrink-0">
+            {/* Active Contact Top Header */}
+            <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/80 flex items-center justify-between shrink-0 shadow-2xs">
               <div className="flex items-center gap-3 overflow-hidden">
                 <button
                   onClick={() => setSelectedContact(null)}
-                  className="md:hidden p-1.5 text-[#64748B] hover:text-[#0F172A] hover:bg-slate-200 rounded-full transition-all"
+                  className="md:hidden p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-200 rounded-full transition-all"
                 >
                   <ArrowLeft className="w-5 h-5" />
                 </button>
-                <div className="w-9 h-9 rounded-full bg-[#0EA5E9]/10 text-[#0EA5E9] font-bold text-xs flex items-center justify-center shrink-0">
+                <div className="w-9 h-9 rounded-full bg-sky-500/10 text-sky-600 font-bold text-xs flex items-center justify-center shrink-0 border border-sky-500/20">
                   {getContactInitials(selectedContact)}
                 </div>
                 <div className="overflow-hidden">
-                  <h3 className="font-bold text-sm text-[#0F172A] truncate leading-tight">
+                  <h3 className="font-bold text-sm text-slate-900 truncate leading-tight">
                     {getContactName(selectedContact)}
                   </h3>
-                  <p className="text-[10px] text-[#64748B] truncate mt-0.5">
+                  <p className="text-[11px] text-slate-500 truncate mt-0.5">
                     {getContactEmail(selectedContact)}
                   </p>
                 </div>
               </div>
 
-              <span className="px-2.5 py-1 rounded bg-[#E2E8F0] text-[#0F172A] text-[9px] font-bold uppercase tracking-wider">
-                Active Session
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60 text-[10px] font-bold flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  Active Chat
+                </span>
+              </div>
             </div>
 
             {/* Message Feed Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#FFFFFF] flex flex-col">
+            <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-3 bg-slate-50/30 flex flex-col">
               {loading ? (
-                <div className="flex flex-col items-center justify-center h-full text-[#64748B] text-xs gap-2">
-                  <RefreshCw className="w-5 h-5 animate-spin text-[#0EA5E9]" />
-                  <span>Loading message thread...</span>
+                <div className="flex flex-col items-center justify-center h-full text-slate-500 text-xs gap-2">
+                  <RefreshCw className="w-5 h-5 animate-spin text-sky-500" />
+                  <span>Loading messages...</span>
                 </div>
               ) : messages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-[#64748B] space-y-2">
-                  <MessageSquare className="w-8 h-8 opacity-40 text-[#0EA5E9]" />
-                  <p className="text-xs font-bold text-[#0F172A]">Start your conversation</p>
-                  <p className="text-[11px] text-[#64748B]">Type a message below to start chatting in real-time.</p>
+                <div className="flex flex-col items-center justify-center h-full text-slate-400 space-y-2 my-auto">
+                  <div className="w-12 h-12 rounded-full bg-sky-50 text-sky-500 flex items-center justify-center border border-sky-100">
+                    <MessageSquare className="w-6 h-6" />
+                  </div>
+                  <p className="text-xs font-bold text-slate-700">No messages yet</p>
+                  <p className="text-[11px] text-slate-500 max-w-[200px] text-center">
+                    Send a message below to start chatting with {getContactName(selectedContact)}.
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-3 flex-1">
@@ -691,16 +717,16 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                         className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'}`}
                       >
                         <div
-                          className={`max-w-[70%] px-4 py-2.5 rounded-[12px] text-sm shadow-sm ${
+                          className={`max-w-[80%] sm:max-w-[65%] px-4 py-2.5 rounded-2xl text-sm shadow-2xs ${
                             isMe
-                              ? 'bg-[#0EA5E9] text-white rounded-tr-none'
-                              : 'bg-[#F1F5F9] text-[#0F172A] rounded-tl-none border border-[#E2E8F0]'
+                              ? 'bg-sky-500 text-white rounded-tr-xs'
+                              : 'bg-white text-slate-900 rounded-tl-xs border border-slate-200/80'
                           }`}
                         >
                           <p className="whitespace-pre-wrap leading-relaxed break-words">{msg.content}</p>
                           <div
-                            className={`text-[9px] mt-1.5 flex items-center justify-end gap-1 ${
-                              isMe ? 'text-sky-100' : 'text-[#64748B]'
+                            className={`text-[9px] mt-1 flex items-center justify-end gap-1 font-medium ${
+                              isMe ? 'text-sky-100' : 'text-slate-400'
                             }`}
                           >
                             <Clock className="w-2.5 h-2.5" />
@@ -718,15 +744,15 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               )}
             </div>
 
-            {/* Message Input Box */}
-            <div className="p-3 border-t border-[#E2E8F0] bg-white shrink-0">
-              <form onSubmit={handleSendMessage} className="flex items-end gap-2">
+            {/* Bottom Message Input Form */}
+            <div className="p-3 border-t border-slate-200 bg-white shrink-0">
+              <form onSubmit={handleSendMessage} className="flex items-end gap-2 max-w-4xl mx-auto">
                 <textarea
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
-                  placeholder="Type a message..."
+                  placeholder="Write a message..."
                   rows={1}
-                  className="flex-1 p-2.5 bg-[#F7FAFC] border border-[#E2E8F0] rounded-lg text-[#0F172A] text-sm placeholder-[#64748B] focus:outline-none focus:border-[#0EA5E9] focus:ring-1 focus:ring-[#0EA5E9] resize-none max-h-24 font-sans leading-relaxed"
+                  className="flex-1 p-3 bg-slate-100/80 border border-slate-200/60 focus:bg-white focus:border-sky-500 rounded-xl text-slate-900 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500/20 resize-none max-h-28 font-sans leading-relaxed transition-all"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
@@ -737,29 +763,32 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                 <button
                   type="submit"
                   disabled={!newMessage.trim()}
-                  className="p-2.5 bg-[#0EA5E9] hover:bg-[#0284C7] disabled:opacity-40 text-white rounded-lg transition-all shadow-sm flex items-center justify-center shrink-0"
+                  className="p-3 bg-sky-500 hover:bg-sky-600 disabled:opacity-40 text-white rounded-xl transition-all shadow-xs flex items-center justify-center shrink-0 active:scale-95"
                 >
-                  <Send className="w-5 h-5" />
+                  <Send className="w-4 h-4" />
                 </button>
               </form>
             </div>
           </div>
         ) : (
-          /* Empty Chat Welcome Screen */
-          <div className="flex flex-col items-center justify-center h-full text-[#64748B] space-y-4 p-6 text-center select-none">
-            <div className="w-16 h-16 rounded-full bg-sky-50 flex items-center justify-center border border-sky-100">
+          /* Empty State Welcome Screen */
+          <div className="flex flex-col items-center justify-center h-full text-slate-400 space-y-4 p-8 text-center select-none bg-slate-50/30">
+            <div className="w-16 h-16 rounded-2xl bg-white shadow-xs border border-slate-200/80 flex items-center justify-center">
               <CoveLogo size="lg" showText={false} />
             </div>
-            <div className="max-w-md">
-              <h2 className="text-xl font-bold text-[#0F172A]">Cove for Web</h2>
-              <p className="text-xs text-[#64748B] mt-1.5 leading-relaxed">
-                Connect and chat instantly with Cove. Click the Directory icon at the top left to add friends, approve pending requests, or test messaging.
+            <div className="max-w-sm space-y-1">
+              <h2 className="text-lg font-bold text-slate-900">Welcome to Cove</h2>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Select a conversation from the left sidebar or open the Directory to connect with people.
               </p>
             </div>
-            <div className="pt-6 border-t border-[#E2E8F0] w-full max-w-xs flex items-center justify-center gap-2 text-[10px] text-[#64748B] font-semibold uppercase tracking-wider">
-              <ShieldCheck className="w-4 h-4 text-[#22C55E]" strokeWidth={2.5} />
-              <span>Secured with Supabase Authentication</span>
-            </div>
+            <button
+              onClick={() => setSidebarView('contacts')}
+              className="mt-2 inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 shadow-2xs transition-colors"
+            >
+              <Users className="w-4 h-4 text-sky-500" />
+              <span>Explore Directory</span>
+            </button>
           </div>
         )}
       </div>

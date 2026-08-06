@@ -398,54 +398,54 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
   return (
     <div className="flex flex-col h-full bg-white select-none">
       {/* Sidebar Header */}
-      <div className="px-4 py-4 bg-[#F7FAFC] border-b border-[#E2E8F0] flex items-center gap-3 shrink-0">
+      <div className="px-4 py-3.5 bg-slate-50 border-b border-slate-200 flex items-center gap-3 shrink-0">
         {onBack && (
           <button
             onClick={onBack}
-            className="p-1 hover:bg-slate-200 text-[#64748B] hover:text-[#0F172A] rounded-full transition-colors"
+            className="p-1.5 hover:bg-slate-200 text-slate-600 hover:text-slate-900 rounded-full transition-colors"
           >
-            <ArrowLeft className="w-5 h-5" />
+            <ArrowLeft className="w-4 h-4" />
           </button>
         )}
         <div className="flex-1">
-          <h2 className="text-base font-bold text-[#0F172A] flex items-center gap-2">
-            <Users className="w-5 h-5 text-[#0EA5E9]" strokeWidth={2.5} />
-            Find & Add Contacts
+          <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+            <Users className="w-4 h-4 text-sky-500" strokeWidth={2.5} />
+            Directory & Contacts
           </h2>
         </div>
         <button
           onClick={fetchRequests}
-          className="p-1.5 hover:bg-slate-200 rounded-full text-[#64748B] hover:text-[#0EA5E9] transition-colors"
+          className="p-1.5 hover:bg-slate-200 rounded-full text-slate-500 hover:text-sky-600 transition-colors"
           title="Refresh requests"
         >
-          <RefreshCw className={`w-4 h-4 ${loadingRequests ? 'animate-spin text-[#0EA5E9]' : ''}`} />
+          <RefreshCw className={`w-3.5 h-3.5 ${loadingRequests ? 'animate-spin text-sky-500' : ''}`} />
         </button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-5">
         {/* Profile Search Section */}
-        <div className="bg-white border border-[#E2E8F0] rounded-[10px] p-4 shadow-sm space-y-3">
-          <h3 className="font-semibold text-xs text-[#0F172A] uppercase tracking-wider flex items-center gap-1.5">
-            <Search className="w-3.5 h-3.5 text-[#0EA5E9]" />
+        <div className="bg-slate-50/60 border border-slate-200/80 rounded-xl p-3.5 shadow-2xs space-y-3">
+          <h3 className="font-semibold text-xs text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+            <Search className="w-3.5 h-3.5 text-sky-500" />
             Search Directory
           </h3>
 
           <form onSubmit={handleSearch} className="space-y-2">
             <div className="relative">
-              <Mail className="w-4 h-4 text-[#64748B] absolute left-3 top-1/2 -translate-y-1/2" />
+              <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="email"
                 value={searchEmail}
                 onChange={(e) => setSearchEmail(e.target.value)}
                 placeholder="Search email e.g. alex@cove.app"
-                className="w-full pl-9 pr-3 py-2 bg-white border border-[#E2E8F0] rounded-lg text-xs text-[#0F172A] placeholder-[#64748B] focus:outline-none focus:border-[#0EA5E9] focus:ring-1 focus:ring-[#0EA5E9] transition-all font-sans"
+                className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 focus:border-sky-500 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500/20 transition-all font-sans"
               />
             </div>
 
             <button
               type="submit"
               disabled={isSearching || !searchEmail.trim()}
-              className="w-full py-2 bg-[#0EA5E9] hover:bg-[#0284C7] disabled:opacity-50 text-white font-semibold text-xs rounded-lg transition-all flex items-center justify-center gap-2"
+              className="w-full py-2 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white font-semibold text-xs rounded-xl transition-all flex items-center justify-center gap-2 shadow-2xs"
             >
               {isSearching ? (
                 <>
@@ -462,8 +462,8 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
           </form>
 
           {/* Quick Demo Suggestions */}
-          <div className="pt-2 border-t border-[#E2E8F0]">
-            <span className="text-[10px] text-[#64748B] block mb-1.5 uppercase font-semibold tracking-wider">
+          <div className="pt-2 border-t border-slate-200/60">
+            <span className="text-[10px] text-slate-500 block mb-1.5 uppercase font-semibold tracking-wider">
               Quick Test Profiles:
             </span>
             <div className="flex flex-col gap-1">
@@ -475,10 +475,10 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
                     setFoundProfile(demo);
                     setHasSearched(true);
                   }}
-                  className="px-2.5 py-1.5 bg-[#F7FAFC] hover:bg-[#E2E8F0] border border-[#E2E8F0] text-left text-xs font-semibold text-[#0F172A] rounded-lg transition-colors flex items-center justify-between"
+                  className="px-2.5 py-1.5 bg-white hover:bg-slate-100/80 border border-slate-200/80 text-left text-xs font-semibold text-slate-800 rounded-lg transition-colors flex items-center justify-between"
                 >
                   <span className="truncate">{demo.display_name}</span>
-                  <span className="text-[10px] text-[#64748B] font-mono font-normal">{demo.email}</span>
+                  <span className="text-[10px] text-slate-400 font-mono font-normal">{demo.email}</span>
                 </button>
               ))}
             </div>
@@ -486,22 +486,22 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
 
           {/* Search result */}
           {hasSearched && (
-            <div className="pt-2 border-t border-[#E2E8F0]">
+            <div className="pt-2 border-t border-slate-200/60">
               {foundProfile ? (
                 <motion.div
                   initial={{ opacity: 0, scale: 0.98 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className="p-3 bg-sky-50/50 border border-sky-100 rounded-lg space-y-2.5"
+                  className="p-3 bg-sky-50/70 border border-sky-100 rounded-xl space-y-2.5"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-[#0EA5E9] text-white font-bold text-xs flex items-center justify-center shrink-0">
+                    <div className="w-8 h-8 rounded-full bg-sky-500 text-white font-bold text-xs flex items-center justify-center shrink-0">
                       {foundProfile.email.slice(0, 2).toUpperCase()}
                     </div>
                     <div className="overflow-hidden">
-                      <h4 className="font-semibold text-[#0F172A] text-xs truncate">
+                      <h4 className="font-semibold text-slate-900 text-xs truncate">
                         {foundProfile.display_name || 'Cove Member'}
                       </h4>
-                      <p className="text-[10px] text-[#64748B] font-mono truncate">
+                      <p className="text-[10px] text-slate-500 font-mono truncate">
                         {foundProfile.email}
                       </p>
                     </div>
@@ -510,7 +510,7 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
                   <button
                     onClick={() => handleSendRequest(foundProfile)}
                     disabled={sendingRequest}
-                    className="w-full py-1.5 bg-[#0EA5E9] hover:bg-[#0284C7] disabled:opacity-50 text-white font-semibold text-xs rounded-lg transition-all flex items-center justify-center gap-1.5"
+                    className="w-full py-1.5 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white font-semibold text-xs rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-2xs"
                   >
                     {sendingRequest ? (
                       <>
@@ -526,11 +526,11 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
                   </button>
                 </motion.div>
               ) : (
-                <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg text-center space-y-1">
+                <div className="p-3 bg-amber-50/80 border border-amber-200/60 rounded-xl text-center space-y-1">
                   <AlertCircle className="w-4 h-4 text-amber-500 mx-auto" />
-                  <p className="text-xs font-semibold text-amber-800">No profile found</p>
+                  <p className="text-xs font-semibold text-amber-900">No profile found</p>
                   <p className="text-[10px] text-amber-700">
-                    "{searchEmail}" doesn't exist yet. We will invite them when you send a request.
+                    "{searchEmail}" is not registered yet. Send an invite request to connect.
                   </p>
                   <button
                     onClick={() => {
@@ -543,9 +543,9 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
                         created_at: new Date().toISOString(),
                       });
                     }}
-                    className="mt-2 w-full py-1 bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold rounded-lg"
+                    className="mt-1.5 w-full py-1 bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold rounded-lg transition-colors"
                   >
-                    Force Add anyway
+                    Add Contact Anyway
                   </button>
                 </div>
               )}
@@ -556,9 +556,9 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
         {/* Incoming requests (Received) */}
         {incomingPending.length > 0 && (
           <div className="space-y-2">
-            <h3 className="text-xs font-bold text-[#0F172A] uppercase tracking-wider flex items-center justify-between">
+            <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center justify-between">
               <span>Received Requests</span>
-              <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px]">
+              <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px]">
                 {incomingPending.length}
               </span>
             </h3>
@@ -572,17 +572,17 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
                 return (
                   <div
                     key={req.id}
-                    className="p-3 bg-[#F7FAFC] border border-[#E2E8F0] rounded-lg flex flex-col gap-2.5"
+                    className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex flex-col gap-2.5"
                   >
                     <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-full bg-[#0F172A] text-white font-bold text-xs flex items-center justify-center shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-slate-900 text-white font-bold text-xs flex items-center justify-center shrink-0">
                         {contactName.slice(0, 2).toUpperCase()}
                       </div>
                       <div className="overflow-hidden flex-1">
-                        <div className="font-bold text-[#0F172A] text-xs truncate">
+                        <div className="font-bold text-slate-900 text-xs truncate">
                           {contactName}
                         </div>
-                        <div className="text-[10px] text-[#64748B] font-mono truncate">
+                        <div className="text-[10px] text-slate-500 font-mono truncate">
                           {contactEmail}
                         </div>
                       </div>
@@ -591,14 +591,14 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => handleUpdateRequestStatus(req.id, 'accepted')}
-                        className="flex-1 py-1 px-2.5 bg-[#22C55E] hover:bg-emerald-600 text-white font-semibold rounded-md text-xs transition-colors flex items-center justify-center gap-1"
+                        className="flex-1 py-1 px-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg text-xs transition-colors flex items-center justify-center gap-1 shadow-2xs"
                       >
                         <Check className="w-3.5 h-3.5" />
                         <span>Accept</span>
                       </button>
                       <button
                         onClick={() => handleUpdateRequestStatus(req.id, 'blocked')}
-                        className="py-1 px-2.5 bg-slate-100 hover:bg-slate-200 text-[#0F172A] font-semibold rounded-md text-xs transition-colors flex items-center justify-center gap-1"
+                        className="py-1 px-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold rounded-lg text-xs transition-colors flex items-center justify-center gap-1"
                       >
                         <X className="w-3.5 h-3.5" />
                         <span>Decline</span>
@@ -614,7 +614,7 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
         {/* Sent requests (Outgoing) */}
         {outgoingPending.length > 0 && (
           <div className="space-y-2">
-            <h3 className="text-xs font-bold text-[#0F172A] uppercase tracking-wider">
+            <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
               Sent Requests ({outgoingPending.length})
             </h3>
             <div className="space-y-1.5">
@@ -626,22 +626,22 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
                 return (
                   <div
                     key={req.id}
-                    className="p-3 bg-white border border-[#E2E8F0] rounded-lg flex items-center justify-between gap-2"
+                    className="p-3 bg-white border border-slate-200 rounded-xl flex items-center justify-between gap-2 shadow-2xs"
                   >
                     <div className="flex items-center gap-2 overflow-hidden">
-                      <div className="w-8 h-8 rounded-full bg-[#F7FAFC] border border-[#E2E8F0] text-[#64748B] font-bold text-xs flex items-center justify-center shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 font-bold text-xs flex items-center justify-center shrink-0">
                         {contactName.slice(0, 2).toUpperCase()}
                       </div>
                       <div className="overflow-hidden">
-                        <div className="font-bold text-[#0F172A] text-xs truncate">
+                        <div className="font-bold text-slate-900 text-xs truncate">
                           {contactName}
                         </div>
-                        <div className="text-[10px] text-[#64748B] truncate">
+                        <div className="text-[10px] text-slate-500 truncate">
                           {contactEmail}
                         </div>
                       </div>
                     </div>
-                    <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100 text-[9px] font-semibold flex items-center gap-0.5 shrink-0">
+                    <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200/60 text-[9px] font-semibold flex items-center gap-0.5 shrink-0">
                       <Clock className="w-2.5 h-2.5" />
                       Pending
                     </span>
@@ -654,20 +654,20 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
 
         {/* Contacts List */}
         <div className="space-y-2">
-          <h3 className="text-xs font-bold text-[#0F172A] uppercase tracking-wider flex items-center justify-between">
+          <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center justify-between">
             <span>My Contacts ({acceptedContacts.length})</span>
           </h3>
 
           {acceptedContacts.length === 0 ? (
-            <div className="p-4 bg-slate-50 rounded-lg text-center border border-[#E2E8F0] space-y-1">
-              <Users className="w-6 h-6 text-[#64748B] mx-auto" />
-              <p className="text-xs font-bold text-[#0F172A]">No contacts yet</p>
-              <p className="text-[10px] text-[#64748B]">
-                Type an email address in the search box above to connect with other Cove members.
+            <div className="p-4 bg-slate-50 rounded-xl text-center border border-slate-200 space-y-1">
+              <Users className="w-5 h-5 text-slate-400 mx-auto" />
+              <p className="text-xs font-bold text-slate-800">No contacts yet</p>
+              <p className="text-[10px] text-slate-500">
+                Search an email address above to connect with Cove members.
               </p>
             </div>
           ) : (
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               {acceptedContacts.map((contact) => {
                 const p = contact.profile;
                 const contactEmail = p?.email || 'user@cove.app';
@@ -677,17 +677,17 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
                   <div
                     key={contact.id}
                     onClick={() => onSelectContact && onSelectContact(contact)}
-                    className="p-2.5 bg-white border border-[#E2E8F0] hover:border-[#0EA5E9] rounded-lg flex items-center justify-between gap-2 transition-all cursor-pointer hover:bg-slate-50 group"
+                    className="p-2.5 bg-white border border-slate-200 hover:border-sky-500/50 rounded-xl flex items-center justify-between gap-2 transition-all cursor-pointer hover:shadow-2xs group"
                   >
                     <div className="flex items-center gap-2.5 overflow-hidden">
-                      <div className="w-8 h-8 rounded-full bg-[#0EA5E9]/10 text-[#0EA5E9] font-bold text-xs flex items-center justify-center shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-sky-500/10 text-sky-600 font-bold text-xs flex items-center justify-center shrink-0">
                         {contactName.slice(0, 2).toUpperCase()}
                       </div>
                       <div className="overflow-hidden">
-                        <h4 className="font-bold text-[#0F172A] text-xs truncate group-hover:text-[#0EA5E9] transition-colors">
+                        <h4 className="font-bold text-slate-900 text-xs truncate group-hover:text-sky-600 transition-colors">
                           {contactName}
                         </h4>
-                        <p className="text-[10px] text-[#64748B] truncate">
+                        <p className="text-[10px] text-slate-500 truncate">
                           {contactEmail}
                         </p>
                       </div>
@@ -698,7 +698,7 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
                         e.stopPropagation();
                         handleCopyEmail(contactEmail);
                       }}
-                      className="p-1 hover:bg-slate-200 text-[#64748B] hover:text-[#0F172A] rounded transition-colors shrink-0"
+                      className="p-1 hover:bg-slate-100 text-slate-400 hover:text-slate-700 rounded transition-colors shrink-0"
                       title="Copy email"
                     >
                       {copiedEmail === contactEmail ? (

@@ -151,13 +151,27 @@ export default function App() {
     );
   }
 
+  if (currentView === 'dashboard' && user) {
+    return (
+      <div className="w-full h-screen min-h-[100dvh] bg-slate-50 font-sans overflow-hidden">
+        <NotificationToast toast={toast} onClose={() => setToast(null)} />
+        <DashboardView
+          key="dashboard"
+          user={user}
+          onSignOut={handleSignOut}
+          showToast={showToast}
+        />
+      </div>
+    );
+  }
+
   return (
     <CalmBackground>
       {/* Toast Alert Notifications */}
       <NotificationToast toast={toast} onClose={() => setToast(null)} />
 
-      {/* Screen Views */}
-      <div className="w-full">
+      {/* Auth Screen Views */}
+      <div className="w-full flex-1 flex flex-col items-center justify-center p-4">
         <AnimatePresence mode="wait">
           {currentView === 'login' && (
             <LoginView
@@ -195,22 +209,13 @@ export default function App() {
               showToast={showToast}
             />
           )}
-
-          {currentView === 'dashboard' && user && (
-            <DashboardView
-              key="dashboard"
-              user={user}
-              onSignOut={handleSignOut}
-              showToast={showToast}
-            />
-          )}
         </AnimatePresence>
-      </div>
 
-      {/* Footer info */}
-      <div className="mt-8 text-center text-slate-500 text-[11px] font-mono">
-        <span>Cove Auth &bull; Powered by Supabase</span>
+        <div className="mt-8 text-center text-slate-400 text-[11px] font-mono">
+          <span>Cove Auth &bull; Powered by Supabase</span>
+        </div>
       </div>
     </CalmBackground>
   );
+
 }
