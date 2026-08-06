@@ -441,19 +441,26 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
       <div className="flex-1 overflow-y-auto p-4 space-y-5">
         {/* Profile Search Section */}
         <div className="bg-slate-50/60 border border-slate-200/80 rounded-xl p-3.5 shadow-2xs space-y-3">
-          <h3 className="font-semibold text-xs text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-            <Search className="w-3.5 h-3.5 text-sky-500" />
-            Search Directory
-          </h3>
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold text-xs text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+              <Search className="w-3.5 h-3.5 text-sky-500" />
+              Search Directory
+            </h3>
+            {user.user_metadata?.username && (
+              <span className="text-[10px] font-mono text-sky-600 font-semibold bg-sky-50 px-2 py-0.5 rounded-full border border-sky-200/60">
+                Your ID: @{user.user_metadata.username}
+              </span>
+            )}
+          </div>
 
           <form onSubmit={handleSearch} className="space-y-2">
             <div className="relative">
-              <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
-                type="email"
+                type="text"
                 value={searchEmail}
                 onChange={(e) => setSearchEmail(e.target.value)}
-                placeholder="Search email e.g. alex@cove.app"
+                placeholder="Enter username (@alex) or email..."
                 className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 focus:border-sky-500 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500/20 transition-all font-sans"
               />
             </div>
@@ -466,12 +473,12 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
               {isSearching ? (
                 <>
                   <RefreshCw className="w-3 h-3 animate-spin" />
-                  <span>Searching...</span>
+                  <span>Searching Directory...</span>
                 </>
               ) : (
                 <>
                   <Search className="w-3.5 h-3.5" />
-                  <span>Find User</span>
+                  <span>Find User by Username / Email</span>
                 </>
               )}
             </button>
@@ -480,21 +487,28 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
           {/* Quick Demo Suggestions */}
           <div className="pt-2 border-t border-slate-200/60">
             <span className="text-[10px] text-slate-500 block mb-1.5 uppercase font-semibold tracking-wider">
-              Quick Test Profiles:
+              Quick Test Profiles (Tap to Connect):
             </span>
             <div className="flex flex-col gap-1">
               {DEMO_PROFILES.filter((p) => p.email !== user.email).map((demo) => (
                 <button
                   key={demo.id}
                   onClick={() => {
-                    setSearchEmail(demo.email);
+                    setSearchEmail(`@${demo.username || demo.email.split('@')[0]}`);
                     setFoundProfile(demo);
                     setHasSearched(true);
                   }}
                   className="px-2.5 py-1.5 bg-white hover:bg-slate-100/80 border border-slate-200/80 text-left text-xs font-semibold text-slate-800 rounded-lg transition-colors flex items-center justify-between"
                 >
-                  <span className="truncate">{demo.display_name}</span>
-                  <span className="text-[10px] text-slate-400 font-mono font-normal">{demo.email}</span>
+                  <div className="flex items-center gap-1.5 truncate">
+                    <span className="truncate">{demo.display_name}</span>
+                    {demo.username && (
+                      <span className="text-[10px] font-mono text-sky-600 font-bold bg-sky-50 px-1.5 py-0.2 rounded">
+                        @{demo.username}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-mono font-normal truncate max-w-[120px]">{demo.email}</span>
                 </button>
               ))}
             </div>
@@ -511,12 +525,19 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-sky-500 text-white font-bold text-xs flex items-center justify-center shrink-0">
-                      {foundProfile.email.slice(0, 2).toUpperCase()}
+                      {(foundProfile.display_name || foundProfile.email).slice(0, 2).toUpperCase()}
                     </div>
                     <div className="overflow-hidden">
-                      <h4 className="font-semibold text-slate-900 text-xs truncate">
-                        {foundProfile.display_name || 'Cove Member'}
-                      </h4>
+                      <div className="flex items-center gap-1.5">
+                        <h4 className="font-semibold text-slate-900 text-xs truncate">
+                          {foundProfile.display_name || 'Cove Member'}
+                        </h4>
+                        {foundProfile.username && (
+                          <span className="text-[10px] text-sky-600 font-mono font-bold bg-sky-100/80 px-1.5 py-0.2 rounded">
+                            @{foundProfile.username.replace(/^@/, '')}
+                          </span>
+                        )}
+                      </div>
                       <p className="text-[10px] text-slate-500 font-mono truncate">
                         {foundProfile.email}
                       </p>
@@ -536,7 +557,7 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
                     ) : (
                       <>
                         <UserPlus className="w-3.5 h-3.5" />
-                        <span>Add Contact</span>
+                        <span>Connect with @{foundProfile.username || foundProfile.display_name}</span>
                       </>
                     )}
                   </button>
@@ -550,18 +571,22 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
                   </p>
                   <button
                     onClick={() => {
-                      const namePart = searchEmail.split('@')[0];
+                      const clean = searchEmail.replace(/^@/, '');
+                      const isEmail = clean.includes('@') && clean.includes('.');
+                      const emailAddr = isEmail ? clean : `${clean}@cove.app`;
+                      const namePart = clean.split('@')[0];
                       const formattedName = namePart.charAt(0).toUpperCase() + namePart.slice(1);
                       handleSendRequest({
-                        id: `user-${searchEmail.replace(/[^a-z0-9]/gi, '_')}`,
-                        email: searchEmail,
+                        id: `user-${clean.replace(/[^a-z0-9]/gi, '_')}`,
+                        email: emailAddr,
                         display_name: formattedName,
+                        username: clean,
                         created_at: new Date().toISOString(),
                       });
                     }}
                     className="mt-1.5 w-full py-1 bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold rounded-lg transition-colors"
                   >
-                    Add Contact Anyway
+                    Send Connect Request Anyway
                   </button>
                 </div>
               )}
