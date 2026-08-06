@@ -418,7 +418,10 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           prev.map((msg) => (msg.id === messageId || msg.id === tempId ? data : msg))
         );
       } else {
-        if (error) console.warn('Supabase message insert notice:', error.message);
+        if (error) {
+          console.warn('Supabase message insert error:', error.message);
+          showToast('error', 'Database Error', `Message not saved to Supabase: ${error.message}`);
+        }
         // Save fallback to localStorage so message persists in conversation
         const localKey = `cove_local_msgs_${convId}`;
         const existing: Message[] = JSON.parse(localStorage.getItem(localKey) || '[]');
@@ -429,6 +432,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       }
     } catch (err: any) {
       console.error('Error sending message:', err);
+      showToast('error', 'Send Error', err.message || 'Failed to send message.');
       const localKey = `cove_local_msgs_${convId}`;
       const existing: Message[] = JSON.parse(localStorage.getItem(localKey) || '[]');
       if (!existing.some((m) => m.id === tempMessage.id)) {
