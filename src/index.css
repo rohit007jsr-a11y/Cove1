@@ -1,1 +1,20 @@
 @import "tailwindcss";
+
+@keyframes tickPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-tick-pop {
+  animation: tickPop 0.28s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}

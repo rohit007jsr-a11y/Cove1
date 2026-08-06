@@ -8,6 +8,9 @@ export interface UserProfile {
   email_confirmed_at?: string | null;
   user_metadata?: {
     full_name?: string;
+    username?: string;
+    about?: string;
+    phone_number?: string;
     avatar_url?: string;
     preferred_theme?: string;
   };
@@ -17,6 +20,9 @@ export interface Profile {
   id: string;
   email: string;
   display_name?: string;
+  username?: string;
+  about?: string;
+  phone_number?: string;
   avatar_url?: string;
   created_at?: string;
 }

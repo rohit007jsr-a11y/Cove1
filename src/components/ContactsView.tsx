@@ -28,24 +28,32 @@ const DEMO_PROFILES: Profile[] = [
     id: '11111111-1111-4111-a111-111111111111',
     email: 'alex@cove.app',
     display_name: 'Alex Morgan',
+    username: 'alex_morgan',
+    about: 'At work 💻 | Cove messaging',
     created_at: new Date(Date.now() - 86400000 * 10).toISOString(),
   },
   {
     id: '22222222-2222-4222-a222-222222222222',
     email: 'maya@cove.app',
     display_name: 'Maya Lin',
+    username: 'maya_lin',
+    about: 'Available ✨',
     created_at: new Date(Date.now() - 86400000 * 5).toISOString(),
   },
   {
     id: '33333333-3333-4333-a333-333333333333',
     email: 'jordan@cove.app',
     display_name: 'Jordan Vance',
+    username: 'jordan_v',
+    about: 'Coding on Cove 🚀',
     created_at: new Date(Date.now() - 86400000 * 2).toISOString(),
   },
   {
     id: '44444444-4444-4444-a444-444444444444',
     email: 'rohit007jsr@gmail.com',
     display_name: 'Rohit Kumar',
+    username: 'rohit_007',
+    about: 'Urgent calls only 📞',
     created_at: new Date(Date.now() - 86400000 * 15).toISOString(),
   }
 ];
@@ -207,15 +215,16 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
 
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const query = searchEmail.trim().toLowerCase();
+    const rawQuery = searchEmail.trim();
+    const cleanQuery = rawQuery.replace(/^@/, '').toLowerCase();
     
-    if (!query) {
-      showToast('info', 'Enter Email', 'Please type an email address to search.');
+    if (!cleanQuery) {
+      showToast('info', 'Enter Search Query', 'Please type an email or username (@handle) to search.');
       return;
     }
 
-    if (user.email && query === user.email.toLowerCase()) {
-      showToast('error', 'Cannot Add Yourself', 'You cannot send a contact request to your own email address.');
+    if (user.email && (cleanQuery === user.email.toLowerCase() || (user.user_metadata?.username && cleanQuery === user.user_metadata.username.toLowerCase()))) {
+      showToast('error', 'Cannot Add Yourself', 'You cannot send a contact request to yourself.');
       setFoundProfile(null);
       setHasSearched(true);
       return;
@@ -228,11 +237,11 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
     let match: Profile | null = null;
 
     try {
-      // Query profiles by email
+      // Query profiles by email OR username
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, email, display_name, avatar_url, created_at')
-        .ilike('email', query)
+        .select('id, email, display_name, username, about, avatar_url, created_at')
+        .or(`email.ilike.${cleanQuery},username.ilike.${cleanQuery}`)
         .maybeSingle();
 
       if (!error && data) {
@@ -240,6 +249,8 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
           id: data.id,
           email: data.email,
           display_name: data.display_name || data.email.split('@')[0],
+          username: data.username,
+          about: data.about,
           avatar_url: data.avatar_url,
           created_at: data.created_at,
         };
@@ -249,31 +260,36 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
     }
 
     if (!match) {
-      const demoMatch = DEMO_PROFILES.find((p) => p.email.toLowerCase() === query);
+      const demoMatch = DEMO_PROFILES.find(
+        (p) =>
+          p.email.toLowerCase() === cleanQuery ||
+          p.username?.toLowerCase() === cleanQuery ||
+          p.display_name?.toLowerCase().includes(cleanQuery)
+      );
       if (demoMatch) {
         match = demoMatch;
       } else {
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (emailRegex.test(query)) {
-          const namePart = query.split('@')[0];
-          const formattedName = namePart.charAt(0).toUpperCase() + namePart.slice(1);
-          const generateUUID = (): string => {
-            if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-              return crypto.randomUUID();
-            }
-            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-              const r = (Math.random() * 16) | 0;
-              return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
-            });
-          };
+        const isEmail = cleanQuery.includes('@') && cleanQuery.includes('.');
+        const emailAddr = isEmail ? cleanQuery : `${cleanQuery}@cove.app`;
+        const namePart = cleanQuery.split('@')[0];
+        const formattedName = namePart.charAt(0).toUpperCase() + namePart.slice(1);
+        const generateUUID = (): string => {
+          if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+            return crypto.randomUUID();
+          }
+          return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+            const r = (Math.random() * 16) | 0;
+            return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+          });
+        };
 
-          match = {
-            id: generateUUID(),
-            email: query,
-            display_name: `${formattedName} (Cove Member)`,
-            created_at: new Date().toISOString(),
-          };
-        }
+        match = {
+          id: generateUUID(),
+          email: emailAddr,
+          display_name: `${formattedName} (Cove Member)`,
+          username: cleanQuery,
+          created_at: new Date().toISOString(),
+        };
       }
     }
 

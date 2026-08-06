@@ -11,6 +11,7 @@ import { supabase } from './lib/supabase';
 import { AuthView, UserProfile, ToastMessage } from './types';
 import { CoveLogo } from './components/CoveLogo';
 import { Sparkles, ShieldCheck, Mail, ArrowRight, RefreshCw } from 'lucide-react';
+import { generateAutoUsername } from './lib/username';
 
 export default function App() {
   const [currentView, setCurrentView] = useState<AuthView>('login');
@@ -39,21 +40,30 @@ export default function App() {
 
         if (mounted) {
           if (session?.user) {
+            const autoUsername = session.user.user_metadata?.username || generateAutoUsername(session.user.email || session.user.user_metadata?.full_name);
+            const userMeta = {
+              ...(session.user.user_metadata || {}),
+              username: autoUsername,
+            };
+
             setUser({
               id: session.user.id,
               email: session.user.email,
               created_at: session.user.created_at,
               last_sign_in_at: session.user.last_sign_in_at,
               email_confirmed_at: session.user.email_confirmed_at,
-              user_metadata: session.user.user_metadata,
+              user_metadata: userMeta,
             });
 
             if (session.user.id && session.user.email) {
+              const meta = (session.user.user_metadata || {}) as Record<string, any>;
               supabase.from('profiles').upsert([
                 {
                   id: session.user.id,
                   email: session.user.email,
-                  display_name: session.user.user_metadata?.full_name || session.user.email.split('@')[0] || 'Cove User',
+                  display_name: meta.full_name || session.user.email.split('@')[0] || 'Cove User',
+                  username: autoUsername,
+                  about: meta.about || 'Hey there! I am using Cove.',
                 }
               ], { onConflict: 'id' }).then(({ error }) => {
                 if (error) console.log('Notice upserting profile on init:', error.message);
@@ -82,13 +92,19 @@ export default function App() {
       console.log('Supabase Auth Event:', event, session?.user?.email);
 
       if (session?.user) {
+        const autoUsername = session.user.user_metadata?.username || generateAutoUsername(session.user.email || session.user.user_metadata?.full_name);
+        const userMeta = {
+          ...(session.user.user_metadata || {}),
+          username: autoUsername,
+        };
+
         setUser({
           id: session.user.id,
           email: session.user.email,
           created_at: session.user.created_at,
           last_sign_in_at: session.user.last_sign_in_at,
           email_confirmed_at: session.user.email_confirmed_at,
-          user_metadata: session.user.user_metadata,
+          user_metadata: userMeta,
         });
 
         if (session.user.email_confirmed_at) {
