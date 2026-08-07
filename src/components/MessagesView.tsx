@@ -345,6 +345,17 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       setMessages((prev) =>
         prev.map((msg) => (msg.id === messageId ? { ...msg, status } : msg))
       );
+      setChatSummaries((prev) =>
+        prev.map((cs) => {
+          if (cs.conversation_id === conversationId && cs.last_message && cs.last_message.id === messageId) {
+            return {
+              ...cs,
+              last_message: { ...cs.last_message, status },
+            };
+          }
+          return cs;
+        })
+      );
     });
 
     // Read receipt handler
@@ -356,6 +367,17 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             ? { ...msg, status: 'read' }
             : msg
         )
+      );
+      setChatSummaries((prev) =>
+        prev.map((cs) => {
+          if (cs.conversation_id === conversationId && cs.last_message && messageIds && messageIds.includes(cs.last_message.id)) {
+            return {
+              ...cs,
+              last_message: { ...cs.last_message, status: 'read' },
+            };
+          }
+          return cs;
+        })
       );
     });
 
@@ -2137,13 +2159,14 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           isOpen={isGroupInfoOpen}
           onClose={() => setIsGroupInfoOpen(false)}
           group={selectedGroup}
-          currentUserId={user.id}
-          availableContacts={contacts}
+          currentUser={user}
+          contacts={contacts}
           onUpdateGroupInfo={handleUpdateGroupInfo}
           onAddParticipant={handleAddParticipant}
           onRemoveParticipant={handleRemoveParticipant}
           onChangeRole={handleChangeRole}
           onLeaveGroup={handleLeaveGroup}
+          showToast={showToast}
         />
       )}
       {/* Full-Screen Media Viewer Lightbox */}

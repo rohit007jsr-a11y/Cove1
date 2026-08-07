@@ -123,10 +123,10 @@ class RealtimeChatClient {
         break;
 
       case 'message:receive':
-      case 'message:ack':
         this.emit('message', data);
         break;
 
+      case 'message:ack':
       case 'message:status_updated':
         this.emit('status', data);
         break;

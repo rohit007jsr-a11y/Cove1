@@ -76,8 +76,6 @@ export const DesignSystemModal: React.FC<DesignSystemModalProps> = ({
   onClose,
   showToast,
 }) => {
-  if (!isOpen) return null;
-
   // Active sandbox section tabs
   const [activeTab, setActiveTab] = useState<'tokens' | 'components' | 'animations' | 'pages'>('tokens');
 
@@ -108,7 +106,7 @@ export const DesignSystemModal: React.FC<DesignSystemModalProps> = ({
 
   // Page View demo selected screen
   const [demoScreen, setDemoScreen] = useState<'chats' | 'conversation' | 'settings'>('chats');
-  
+
   // Theme settings states for demo settings page
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [appDensity, setAppDensity] = useState<'cozy' | 'standard'>('standard');
@@ -206,6 +204,8 @@ export const DesignSystemModal: React.FC<DesignSystemModalProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
+
+  if (!isOpen) return null;
 
   return (
     <MotionConfig reducedMotion={simulateReducedMotion ? "always" : "user"}>
