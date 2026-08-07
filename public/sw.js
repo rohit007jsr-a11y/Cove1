@@ -37,18 +37,72 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch Event - Network first with Cache fallback for API/Static assets
+// Fetch Event - Dynamic WhatsApp-style caching strategy
 self.addEventListener('fetch', (event) => {
   // Only handle GET requests
   if (event.request.method !== 'GET') return;
 
+  const url = new URL(event.request.url);
+
+  // Skip WebSocket connections and dynamic hot-reload connections
+  if (url.pathname.startsWith('/ws') || url.pathname.includes('hmr') || url.pathname.includes('vite')) {
+    return;
+  }
+
   // Skip cross-origin non-http extension requests
   if (!event.request.url.startsWith('http')) return;
 
+  // WhatsApp-Style Cache-First Strategy for Media, Avatars, and Attachments
+  const isMediaOrAvatar = 
+    url.pathname.includes('/storage/v1/object/public/') || 
+    url.pathname.includes('/api/upload') ||
+    url.pathname.match(/\.(png|jpg|jpeg|webp|gif|svg|mp3|wav|mp4|pdf|docx|xls|xlsx|zip)$/i) ||
+    url.host.includes('googleusercontent.com') || // Google auth profile pictures
+    url.host.includes('avatars.githubusercontent.com'); // GitHub auth profile pictures
+
+  if (isMediaOrAvatar) {
+    event.respondWith(
+      caches.match(event.request).then((cachedResponse) => {
+        if (cachedResponse) {
+          // Serve from cache instantly, but fetch in background to verify freshness (Stale-While-Revalidate)
+          fetch(event.request)
+            .then((networkResponse) => {
+              if (networkResponse && (networkResponse.status === 200 || networkResponse.status === 0)) {
+                const responseToCache = networkResponse.clone();
+                caches.open(CACHE_NAME).then((cache) => {
+                  cache.put(event.request, responseToCache);
+                });
+              }
+            })
+            .catch(() => { /* ignore offline background fetch failures */ });
+          return cachedResponse;
+        }
+
+        // Cache miss: fetch from network, cache, and return
+        return fetch(event.request)
+          .then((networkResponse) => {
+            // Note: status === 0 is for opaque cross-origin resources
+            if (networkResponse && (networkResponse.status === 200 || networkResponse.status === 0)) {
+              const responseToCache = networkResponse.clone();
+              caches.open(CACHE_NAME).then((cache) => {
+                cache.put(event.request, responseToCache);
+              });
+            }
+            return networkResponse;
+          })
+          .catch(() => {
+            // Offline fallback or placeholder
+            console.log('[SW] Failed to fetch media offline:', event.request.url);
+          });
+      })
+    );
+    return;
+  }
+
+  // Network-First with Cache Fallback for HTML, JS, CSS, and other dynamic assets
   event.respondWith(
     fetch(event.request)
       .then((networkResponse) => {
-        // Clone and update cache if valid response
         if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
           const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {

@@ -73,10 +73,32 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
   const [loadingRequests, setLoadingRequests] = useState(true);
   const [sendingRequest, setSendingRequest] = useState(false);
   const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
+  const [discoverProfiles, setDiscoverProfiles] = useState<Profile[]>([]);
+  const [loadingDiscover, setLoadingDiscover] = useState(false);
 
   useEffect(() => {
     fetchRequests();
+    fetchDiscoverProfiles();
   }, [user.id, user.email]);
+
+  const fetchDiscoverProfiles = async () => {
+    setLoadingDiscover(true);
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, email, display_name, username, about, avatar_url, created_at')
+        .neq('id', user.id)
+        .limit(30);
+
+      if (!error && data) {
+        setDiscoverProfiles(data as Profile[]);
+      }
+    } catch (err) {
+      console.warn('Error fetching discover profiles:', err);
+    } finally {
+      setLoadingDiscover(false);
+    }
+  };
 
   const fetchRequests = async () => {
     setLoadingRequests(true);
@@ -484,33 +506,51 @@ export const ContactsView: React.FC<ContactsViewProps> = ({
             </button>
           </form>
 
-          {/* Quick Demo Suggestions */}
+          {/* Registered Users Discovery */}
           <div className="pt-2 border-t border-slate-200/60">
-            <span className="text-[10px] text-slate-500 block mb-1.5 uppercase font-semibold tracking-wider">
-              Quick Test Profiles (Tap to Connect):
+            <span className="text-[10px] text-slate-500 block mb-1.5 uppercase font-semibold tracking-wider flex items-center justify-between">
+              <span>Registered Active Users (Real-Time):</span>
+              <button 
+                type="button"
+                onClick={fetchDiscoverProfiles}
+                className="text-[10px] text-sky-500 hover:underline flex items-center gap-1 font-semibold"
+              >
+                <RefreshCw className="w-2.5 h-2.5" /> Refresh
+              </button>
             </span>
-            <div className="flex flex-col gap-1">
-              {DEMO_PROFILES.filter((p) => p.email !== user.email).map((demo) => (
-                <button
-                  key={demo.id}
-                  onClick={() => {
-                    setSearchEmail(`@${demo.username || demo.email.split('@')[0]}`);
-                    setFoundProfile(demo);
-                    setHasSearched(true);
-                  }}
-                  className="px-2.5 py-1.5 bg-white hover:bg-slate-100/80 border border-slate-200/80 text-left text-xs font-semibold text-slate-800 rounded-lg transition-colors flex items-center justify-between"
-                >
-                  <div className="flex items-center gap-1.5 truncate">
-                    <span className="truncate">{demo.display_name}</span>
-                    {demo.username && (
-                      <span className="text-[10px] font-mono text-sky-600 font-bold bg-sky-50 px-1.5 py-0.2 rounded">
-                        @{demo.username}
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-[10px] text-slate-400 font-mono font-normal truncate max-w-[120px]">{demo.email}</span>
-                </button>
-              ))}
+            <div className="flex flex-col gap-1 max-h-[140px] overflow-y-auto pr-1">
+              {loadingDiscover ? (
+                <div className="text-[11px] text-slate-400 py-1 flex items-center gap-1">
+                  <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Fetching directory...
+                </div>
+              ) : discoverProfiles.filter((p) => p.email !== user.email).length === 0 ? (
+                <div className="text-[11px] text-slate-400 py-1 italic">
+                  No other active users registered yet. Start another session or invite others!
+                </div>
+              ) : (
+                discoverProfiles.filter((p) => p.email !== user.email).map((demo) => (
+                  <button
+                    key={demo.id}
+                    type="button"
+                    onClick={() => {
+                      setSearchEmail(demo.email || `@${demo.username || demo.display_name}`);
+                      setFoundProfile(demo);
+                      setHasSearched(true);
+                    }}
+                    className="px-2.5 py-1.5 bg-white hover:bg-slate-100/80 border border-slate-200/80 text-left text-xs font-semibold text-slate-800 rounded-lg transition-colors flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-1.5 truncate">
+                      <span className="truncate">{demo.display_name || demo.email?.split('@')[0]}</span>
+                      {demo.username && (
+                        <span className="text-[10px] font-mono text-sky-600 font-bold bg-sky-50 px-1.5 py-0.2 rounded">
+                          @{demo.username}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-mono font-normal truncate max-w-[120px]">{demo.email}</span>
+                  </button>
+                ))
+              )}
             </div>
           </div>
 
