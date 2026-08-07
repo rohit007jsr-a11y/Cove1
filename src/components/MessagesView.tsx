@@ -16,13 +16,21 @@ import {
   Check,
   CheckCheck,
   User,
-  AtSign
+  AtSign,
+  Settings
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { UserProfile, ContactRequest, Message, Profile } from '../types';
 import { CoveLogo } from './CoveLogo';
 import { ContactsView } from './ContactsView';
 import { ProfileView } from './ProfileView';
+import { AccountSettingsModal } from './AccountSettingsModal';
+import {
+  cacheConversationMessages,
+  getCachedConversationMessages,
+  cacheContactsList,
+  getCachedContactsList,
+} from '../lib/cache';
 
 interface MessagesViewProps {
   user: UserProfile;
@@ -43,6 +51,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const [loading, setLoading] = useState(false);
   const [sidebarView, setSidebarView] = useState<'chats' | 'contacts' | 'profile' | 'session'>('chats');
   const [rightPaneView, setRightPaneView] = useState<'chat' | 'profile'>('chat');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -180,6 +189,12 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
   // Fetch accepted contacts
   const fetchContacts = async () => {
+    // 1. Instant load from local cache first if available
+    const cached = getCachedContactsList(user.id);
+    if (cached && Array.isArray(cached) && cached.length > 0) {
+      setContacts(cached);
+    }
+
     try {
       const { data, error } = await supabase
         .from('contacts')
@@ -200,7 +215,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         if (otherUserIds.length > 0) {
           const { data: profs } = await supabase
             .from('profiles')
-            .select('id, email, display_name, avatar_url, created_at')
+            .select('id, email, display_name, username, about, avatar_url, created_at')
             .in('id', otherUserIds);
 
           if (profs && Array.isArray(profs)) {
@@ -209,6 +224,8 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                 id: p.id,
                 email: p.email,
                 display_name: p.display_name,
+                username: p.username,
+                about: p.about,
                 avatar_url: p.avatar_url,
                 created_at: p.created_at,
               });
@@ -235,6 +252,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         });
 
         setContacts(mapped);
+        cacheContactsList(user.id, mapped);
       } else {
         const localStore = localStorage.getItem('cove_contact_requests_global');
         if (localStore) {
@@ -274,13 +292,26 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     let isMounted = true;
 
     const loadConversationAndMessages = async () => {
-      setLoading(true);
+      // Check cached messages first for instant zero-lag loading
+      const cachedMsgs = getCachedConversationMessages(otherUserId) || getCachedConversationMessages(selectedContact.id);
+      if (cachedMsgs && cachedMsgs.length > 0 && isMounted) {
+        setMessages(cachedMsgs);
+      } else {
+        setLoading(true);
+      }
+
       const convId = await getOrCreateConversationId(user.id, otherUserId, selectedContact.profile);
 
       if (!isMounted) return;
       setActiveConversationId(convId);
 
       if (convId) {
+        // Also check if cached by convId
+        const cachedByConv = getCachedConversationMessages(convId);
+        if (cachedByConv && cachedByConv.length > 0 && isMounted) {
+          setMessages(cachedByConv);
+        }
+
         try {
           const { data, error } = await supabase
             .from('messages')
@@ -306,6 +337,8 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
           if (isMounted) {
             setMessages(combined);
+            cacheConversationMessages(convId, combined);
+            if (otherUserId) cacheConversationMessages(otherUserId, combined);
           }
         } catch (err) {
           console.error('Error fetching messages:', err);
@@ -548,6 +581,15 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                     title="Session Inspector"
                   >
                     <Key className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setIsSettingsOpen(true)}
+                    className={`p-2 rounded-full transition-colors ${
+                      isSettingsOpen ? 'bg-sky-100 text-sky-600 font-bold' : 'hover:bg-slate-100 text-slate-600 hover:text-sky-600'
+                    }`}
+                    title="Account Settings & Security"
+                  >
+                    <Settings className="w-4 h-4" />
                   </button>
                   <button
                     onClick={onSignOut}
@@ -934,6 +976,15 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Account Settings Modal */}
+      <AccountSettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        user={user}
+        onSignOut={onSignOut}
+        showToast={showToast}
+      />
     </div>
   );
 };
