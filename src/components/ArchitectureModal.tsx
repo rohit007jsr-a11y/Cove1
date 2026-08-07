@@ -153,36 +153,32 @@ export const ArchitectureModal: React.FC<ArchitectureModalProps> = ({ isOpen, on
                 <div>
                   <h3 className="font-bold text-slate-900 text-sm mb-3 flex items-center gap-2">
                     <Code2 className="w-4 h-4 text-sky-500" />
-                    Core Message Data Model Schema
+                    Status / Stories Data Model Schema (24h Expiration)
                   </h3>
                   <pre className="p-4 bg-slate-900 text-sky-300 rounded-xl font-mono text-[11px] overflow-x-auto">
-{`export type MessageStatus = 'sending' | 'sent' | 'delivered' | 'read';
-export type MessageType = 'text' | 'image' | 'video' | 'document' | 'voice' | 'voice_note' | 'file' | 'system';
+{`export type StatusPrivacy = 'all' | 'contacts' | 'except';
 
-export interface Message {
-  id: string;               // UUID v4
-  conversation_id: string;  // Shared 1:1 or Group conversation ID
-  sender_id: string;        // Authenticated user UUID
-  sender_name?: string;     // Sender display name
-  receiver_id?: string;     // Recipient or Group ID
-  content: string;          // Text or caption
-  type: MessageType;        // 'text' | 'image' | 'video' | 'document' | 'voice_note' | 'file'
-  media_url?: string;       // Base64 thumbnail or CDN URL
-  thumbnail_url?: string;   // Image/Video preview thumbnail URL
-  mime_type?: string;       // MIME type (e.g. video/mp4, application/pdf)
-  file_size?: number;       // Size in bytes
-  duration?: number;        // Media duration in seconds (for voice/video)
-  file_name?: string;       // Document/File display name
-  created_at: string;       // ISO 8601 Timestamp
-  status: MessageStatus;    // 'sending' -> 'sent' -> 'delivered' -> 'read'
-  read_at?: string | null;  // Read timestamp
-  is_group?: boolean;       // Group message flag
-  group_id?: string;        // Target group ID
-  reply_to?: {             // Replying context
-    id: string;
-    sender_name: string;
-    content: string;
-  } | null;
+export interface StatusViewer {
+  userId: string;
+  userName: string;
+  userAvatar?: string;
+  viewedAt: string;         // Timestamp when viewer opened story
+}
+
+export interface StatusItem {
+  id: string;               // Unique ID
+  ownerId: string;          // Author UUID
+  ownerName: string;        // Display Name
+  ownerAvatar?: string;     // Profile Avatar URL
+  type: 'text' | 'image' | 'video';
+  contentUrl?: string;       // CDN or Base64 media URL
+  text?: string;            // Text status content
+  bgColor?: string;         // Tailwind gradient preset
+  caption?: string;         // Media caption text
+  createdAt: string;        // Creation ISO timestamp
+  expiresAt: string;        // Auto-calculated ISO timestamp (createdAt + 24h)
+  privacy: StatusPrivacy;   // 'contacts' | 'all'
+  viewers: StatusViewer[];  // Audience view receipt tracker
 }`}
                   </pre>
                 </div>
@@ -226,6 +222,16 @@ export interface Message {
                           <td className="p-2.5 font-mono text-sky-600 font-semibold">message:read</td>
                           <td className="p-2.5">Client → Server</td>
                           <td className="p-2.5">Triggers read receipt when receiver focuses open chat thread.</td>
+                        </tr>
+                        <tr>
+                          <td className="p-2.5 font-mono text-sky-600 font-semibold">message:react</td>
+                          <td className="p-2.5">Bi-directional</td>
+                          <td className="p-2.5">Toggles message emoji reaction and broadcasts `message:reaction_updated`.</td>
+                        </tr>
+                        <tr>
+                          <td className="p-2.5 font-mono text-sky-600 font-semibold">message:forward</td>
+                          <td className="p-2.5">Client → Server</td>
+                          <td className="p-2.5">Forwards message payload to up to 5 target contacts or groups (anti-spam limit).</td>
                         </tr>
                         <tr>
                           <td className="p-2.5 font-mono text-sky-600 font-semibold">typing:start / stop</td>

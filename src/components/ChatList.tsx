@@ -1,16 +1,17 @@
-import React, { useState } from 'react';
-import { Search, X, MessageSquare, Image as ImageIcon, Volume2, FileText, Users, Plus, Shield } from 'lucide-react';
-import { ChatSummary } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Search, X, MessageSquare, Image as ImageIcon, Volume2, FileText, Users, Plus, Shield, MessageCircle } from 'lucide-react';
+import { ChatSummary, MessageSearchResult } from '../types';
 import { ListItemEnter } from './animations/Animations';
 
 interface ChatListProps {
   chats: ChatSummary[];
   selectedContactId: string | null;
-  onSelectChat: (chat: ChatSummary) => void;
+  onSelectChat: (chat: ChatSummary, jumpMessageId?: string) => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
   onOpenDirectory: () => void;
   onOpenCreateGroup?: () => void;
+  currentUserId?: string;
 }
 
 export const ChatList: React.FC<ChatListProps> = ({
@@ -21,8 +22,38 @@ export const ChatList: React.FC<ChatListProps> = ({
   onSearchChange,
   onOpenDirectory,
   onOpenCreateGroup,
+  currentUserId,
 }) => {
   const [filterTab, setFilterTab] = useState<'all' | 'direct' | 'groups'>('all');
+  const [searchTab, setSearchTab] = useState<'chats' | 'messages'>('chats');
+  const [remoteMessageResults, setRemoteMessageResults] = useState<MessageSearchResult[]>([]);
+  const [isSearchingMessages, setIsSearchingMessages] = useState(false);
+
+  useEffect(() => {
+    if (!searchQuery || searchQuery.trim().length < 2) {
+      setRemoteMessageResults([]);
+      setIsSearchingMessages(false);
+      setSearchTab('chats');
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsSearchingMessages(true);
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}&userId=${currentUserId || ''}`);
+        if (res.ok) {
+          const data = await res.json();
+          setRemoteMessageResults(data.messages || []);
+        }
+      } catch (err) {
+        console.error('Failed to search messages API:', err);
+      } finally {
+        setIsSearchingMessages(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, currentUserId]);
 
   const formatLastTime = (isoString?: string) => {
     if (!isoString) return '';
@@ -99,38 +130,126 @@ export const ChatList: React.FC<ChatListProps> = ({
           )}
         </div>
 
-        {/* Filter Tabs */}
-        <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl text-[11px] font-bold text-slate-600">
-          <button
-            onClick={() => setFilterTab('all')}
-            className={`flex-1 py-1 rounded-lg transition-all ${
-              filterTab === 'all' ? 'bg-white text-sky-600 shadow-2xs' : 'hover:text-slate-900'
-            }`}
-          >
-            All
-          </button>
-          <button
-            onClick={() => setFilterTab('direct')}
-            className={`flex-1 py-1 rounded-lg transition-all ${
-              filterTab === 'direct' ? 'bg-white text-sky-600 shadow-2xs' : 'hover:text-slate-900'
-            }`}
-          >
-            Direct
-          </button>
-          <button
-            onClick={() => setFilterTab('groups')}
-            className={`flex-1 py-1 rounded-lg transition-all ${
-              filterTab === 'groups' ? 'bg-white text-sky-600 shadow-2xs' : 'hover:text-slate-900'
-            }`}
-          >
-            Groups
-          </button>
-        </div>
+        {/* Search Results Category Switcher (if search query active) */}
+        {searchQuery.trim() ? (
+          <div className="flex items-center gap-1 bg-amber-50/80 p-0.5 rounded-xl text-[11px] font-bold border border-amber-200/80">
+            <button
+              onClick={() => setSearchTab('chats')}
+              className={`flex-1 py-1 rounded-lg transition-all ${
+                searchTab === 'chats' ? 'bg-amber-500 text-white shadow-2xs' : 'text-amber-800 hover:bg-amber-100/60'
+              }`}
+            >
+              Chats ({sortedChats.length})
+            </button>
+            <button
+              onClick={() => setSearchTab('messages')}
+              className={`flex-1 py-1 rounded-lg transition-all flex items-center justify-center gap-1 ${
+                searchTab === 'messages' ? 'bg-amber-500 text-white shadow-2xs' : 'text-amber-800 hover:bg-amber-100/60'
+              }`}
+            >
+              <span>Messages</span>
+              {isSearchingMessages ? (
+                <span className="w-2.5 h-2.5 rounded-full border-2 border-white border-t-transparent animate-spin ml-1" />
+              ) : (
+                <span>({remoteMessageResults.length})</span>
+              )}
+            </button>
+          </div>
+        ) : (
+          /* Filter Tabs */
+          <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl text-[11px] font-bold text-slate-600">
+            <button
+              onClick={() => setFilterTab('all')}
+              className={`flex-1 py-1 rounded-lg transition-all ${
+                filterTab === 'all' ? 'bg-white text-sky-600 shadow-2xs' : 'hover:text-slate-900'
+              }`}
+            >
+              All
+            </button>
+            <button
+              onClick={() => setFilterTab('direct')}
+              className={`flex-1 py-1 rounded-lg transition-all ${
+                filterTab === 'direct' ? 'bg-white text-sky-600 shadow-2xs' : 'hover:text-slate-900'
+              }`}
+            >
+              Direct
+            </button>
+            <button
+              onClick={() => setFilterTab('groups')}
+              className={`flex-1 py-1 rounded-lg transition-all ${
+                filterTab === 'groups' ? 'bg-white text-sky-600 shadow-2xs' : 'hover:text-slate-900'
+              }`}
+            >
+              Groups
+            </button>
+          </div>
+        )}
       </div>
 
       {/* List Feed */}
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        {sortedChats.length === 0 ? (
+        {searchTab === 'messages' ? (
+          remoteMessageResults.length === 0 ? (
+            <div className="p-8 text-center space-y-2 my-auto">
+              <div className="w-10 h-10 rounded-full bg-amber-50 text-amber-500 flex items-center justify-center mx-auto border border-amber-200">
+                <Search className="w-5 h-5" />
+              </div>
+              <p className="text-xs font-bold text-slate-800">No matching messages</p>
+              <p className="text-[11px] text-slate-500">Try searching for keywords or phrases.</p>
+            </div>
+          ) : (
+            remoteMessageResults.map((result, idx) => {
+              const matchingChat = chats.find(
+                (c) =>
+                  c.conversation_id === result.conversationId ||
+                  c.contact_id === result.contactId ||
+                  (c.is_group && c.group?.id === result.groupId)
+              );
+
+              return (
+                <ListItemEnter key={result.messageId} index={idx}>
+                  <button
+                    onClick={() => {
+                      if (matchingChat) {
+                        onSelectChat(matchingChat, result.messageId);
+                      }
+                    }}
+                    className="w-full text-left p-3 rounded-2xl bg-white border border-slate-200/80 hover:border-amber-400 hover:shadow-xs transition-all space-y-1 group"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 overflow-hidden">
+                        <MessageCircle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                        <span className="font-bold text-xs text-slate-900 truncate">
+                          {result.chatName}
+                        </span>
+                        {result.senderName && (
+                          <span className="text-[10px] text-slate-500 font-medium truncate">
+                            &bull; {result.senderName}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[9px] text-slate-400 font-medium shrink-0">
+                        {formatLastTime(result.createdAt)}
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-slate-600 line-clamp-2 leading-snug">
+                      {result.snippet.split(new RegExp(`(${searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')).map((part, pIdx) =>
+                        part.toLowerCase() === searchQuery.toLowerCase() ? (
+                          <mark key={pIdx} className="bg-amber-300 text-slate-950 px-0.5 rounded font-bold">
+                            {part}
+                          </mark>
+                        ) : (
+                          part
+                        )
+                      )}
+                    </p>
+                  </button>
+                </ListItemEnter>
+              );
+            })
+          )
+        ) : sortedChats.length === 0 ? (
           <div className="p-8 text-center space-y-3 my-auto">
             <div className="w-12 h-12 rounded-full bg-sky-50 border border-sky-100 text-sky-500 flex items-center justify-center mx-auto">
               {filterTab === 'groups' ? <Users className="w-6 h-6" /> : <MessageSquare className="w-6 h-6" />}

@@ -11,6 +11,12 @@ interface ChatClient {
   lastActive: number;
 }
 
+interface ReactionPayload {
+  emoji: string;
+  userId: string;
+  userName?: string;
+}
+
 interface MessagePayload {
   id: string;
   conversationId: string;
@@ -35,6 +41,10 @@ interface MessagePayload {
     senderName: string;
     content: string;
   } | null;
+  reactions?: ReactionPayload[];
+  isForwarded?: boolean;
+  forwardCount?: number;
+  originalMessageId?: string;
 }
 
 interface GroupSettings {
@@ -88,6 +98,18 @@ function broadcastToGroup(groupId: string, payload: any, excludeUserId?: string)
   });
 }
 
+// Helper: Broadcast WebSocket message to all connected clients
+function broadcastToAll(payloadObj: any) {
+  const payload = JSON.stringify(payloadObj);
+  clientsMap.forEach((sockets) => {
+    sockets.forEach((ws) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(payload);
+      }
+    });
+  });
+}
+
 // API REST routes
 app.get('/api/health', (req, res) => {
   res.json({
@@ -96,6 +118,243 @@ app.get('/api/health', (req, res) => {
     groupsCount: groupsMap.size,
     timestamp: new Date().toISOString(),
   });
+});
+
+// Status/Stories Data Store
+interface StatusViewerData {
+  userId: string;
+  userName: string;
+  userAvatar?: string;
+  viewedAt: string;
+}
+
+interface StatusItemData {
+  id: string;
+  ownerId: string;
+  ownerName: string;
+  ownerAvatar?: string;
+  type: 'text' | 'image' | 'video';
+  contentUrl?: string;
+  text?: string;
+  bgColor?: string;
+  caption?: string;
+  createdAt: string;
+  expiresAt: string;
+  privacy: 'all' | 'contacts' | 'except';
+  viewers: StatusViewerData[];
+}
+
+const statusesMap = new Map<string, StatusItemData>();
+
+// Seed initial active demo statuses with 24-hour expiration window
+const seedNow = Date.now();
+const hourMs = 60 * 60 * 1000;
+
+const seedStatuses: StatusItemData[] = [
+  {
+    id: 'status-sarah-1',
+    ownerId: 'contact-1',
+    ownerName: 'Sarah Chen',
+    ownerAvatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&q=80',
+    type: 'image',
+    contentUrl: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80',
+    caption: 'Golden hour vibes 🌅',
+    createdAt: new Date(seedNow - 2 * hourMs).toISOString(),
+    expiresAt: new Date(seedNow + 22 * hourMs).toISOString(),
+    privacy: 'contacts',
+    viewers: [
+      {
+        userId: 'contact-2',
+        userName: 'Alex Rivera',
+        userAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&q=80',
+        viewedAt: new Date(seedNow - 1 * hourMs).toISOString(),
+      },
+    ],
+  },
+  {
+    id: 'status-sarah-2',
+    ownerId: 'contact-1',
+    ownerName: 'Sarah Chen',
+    ownerAvatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&q=80',
+    type: 'text',
+    text: 'Launching our new design system & AI feature updates today! 🚀✨',
+    bgColor: 'from-violet-600 to-indigo-900',
+    createdAt: new Date(seedNow - 1 * hourMs).toISOString(),
+    expiresAt: new Date(seedNow + 23 * hourMs).toISOString(),
+    privacy: 'contacts',
+    viewers: [],
+  },
+  {
+    id: 'status-alex-1',
+    ownerId: 'contact-2',
+    ownerName: 'Alex Rivera',
+    ownerAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&q=80',
+    type: 'image',
+    contentUrl: 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=800&q=80',
+    caption: 'Late night coding & architecture session ⚡',
+    createdAt: new Date(seedNow - 4 * hourMs).toISOString(),
+    expiresAt: new Date(seedNow + 20 * hourMs).toISOString(),
+    privacy: 'contacts',
+    viewers: [],
+  },
+];
+
+seedStatuses.forEach((st) => statusesMap.set(st.id, st));
+
+// Helper to clean up expired statuses
+function cleanupExpiredStatuses() {
+  const now = Date.now();
+  statusesMap.forEach((status, id) => {
+    if (new Date(status.expiresAt).getTime() <= now) {
+      statusesMap.delete(id);
+    }
+  });
+}
+
+// REST API for Status/Stories
+app.get('/api/statuses', (req, res) => {
+  cleanupExpiredStatuses();
+  const userId = req.query.userId as string;
+  const activeList = Array.from(statusesMap.values());
+
+  // Group statuses by owner
+  const groupsMap = new Map<string, {
+    ownerId: string;
+    ownerName: string;
+    ownerAvatar?: string;
+    isOwn: boolean;
+    hasUnviewed: boolean;
+    lastUpdated: string;
+    statuses: StatusItemData[];
+  }>();
+
+  activeList.forEach((st) => {
+    if (!groupsMap.has(st.ownerId)) {
+      groupsMap.set(st.ownerId, {
+        ownerId: st.ownerId,
+        ownerName: st.ownerName,
+        ownerAvatar: st.ownerAvatar,
+        isOwn: Boolean(userId && st.ownerId === userId),
+        hasUnviewed: false,
+        lastUpdated: st.createdAt,
+        statuses: [],
+      });
+    }
+
+    const grp = groupsMap.get(st.ownerId)!;
+    grp.statuses.push(st);
+
+    // Update lastUpdated timestamp to latest status
+    if (new Date(st.createdAt).getTime() > new Date(grp.lastUpdated).getTime()) {
+      grp.lastUpdated = st.createdAt;
+    }
+
+    // Check if current user has viewed this item
+    const isViewed = userId
+      ? st.viewers.some((v) => v.userId === userId)
+      : false;
+    if (!isViewed && (!userId || st.ownerId !== userId)) {
+      grp.hasUnviewed = true;
+    }
+  });
+
+  res.json({
+    statuses: activeList,
+    groups: Array.from(groupsMap.values()),
+  });
+});
+
+app.post('/api/statuses', (req, res) => {
+  cleanupExpiredStatuses();
+  const {
+    ownerId,
+    ownerName,
+    ownerAvatar,
+    type,
+    contentUrl,
+    text,
+    bgColor,
+    caption,
+    privacy,
+  } = req.body;
+
+  if (!ownerId || !ownerName) {
+    return res.status(400).json({ error: 'Missing required owner fields' });
+  }
+
+  const now = Date.now();
+  const newStatus: StatusItemData = {
+    id: `status-${now}-${Math.random().toString(36).substring(2, 7)}`,
+    ownerId,
+    ownerName,
+    ownerAvatar,
+    type: type || 'text',
+    contentUrl,
+    text,
+    bgColor: bgColor || 'from-sky-500 to-blue-700',
+    caption,
+    createdAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + 24 * 60 * 60 * 1000).toISOString(),
+    privacy: privacy || 'contacts',
+    viewers: [],
+  };
+
+  statusesMap.set(newStatus.id, newStatus);
+
+  // Broadcast to all WebSocket clients
+  broadcastToAll({
+    type: 'status:created',
+    status: newStatus,
+  });
+
+  res.json({ success: true, status: newStatus });
+});
+
+app.post('/api/statuses/:id/view', (req, res) => {
+  const { id } = req.params;
+  const { userId, userName, userAvatar } = req.body;
+
+  const status = statusesMap.get(id);
+  if (!status) {
+    return res.status(404).json({ error: 'Status not found or expired' });
+  }
+
+  if (userId && !status.viewers.some((v) => v.userId === userId)) {
+    const newViewer: StatusViewerData = {
+      userId,
+      userName: userName || 'Anonymous',
+      userAvatar,
+      viewedAt: new Date().toISOString(),
+    };
+    status.viewers.push(newViewer);
+    statusesMap.set(id, status);
+
+    // Broadcast view update to owner
+    broadcastToAll({
+      type: 'status:viewed',
+      statusId: id,
+      viewer: newViewer,
+      ownerId: status.ownerId,
+    });
+  }
+
+  res.json({ success: true, status });
+});
+
+app.delete('/api/statuses/:id', (req, res) => {
+  const { id } = req.params;
+  const status = statusesMap.get(id);
+  if (!status) return res.status(404).json({ error: 'Status not found' });
+
+  statusesMap.delete(id);
+
+  broadcastToAll({
+    type: 'status:deleted',
+    statusId: id,
+    ownerId: status.ownerId,
+  });
+
+  res.json({ success: true });
 });
 
 // REST API for Media Uploads
@@ -342,6 +601,74 @@ app.post('/api/groups/:groupId/roles', (req, res) => {
   });
 
   res.json({ group, systemMessage: sysMsg });
+});
+
+app.get('/api/search', (req, res) => {
+  const query = (req.query.q as string || '').trim().toLowerCase();
+  const userId = req.query.userId as string;
+
+  if (!query) {
+    return res.json({ messages: [], groups: [] });
+  }
+
+  // 1. Search messages in conversationMessages
+  const matchingMessages: any[] = [];
+
+  conversationMessages.forEach((msgs, convId) => {
+    msgs.forEach((msg) => {
+      if (!msg.content) return;
+      const contentLower = msg.content.toLowerCase();
+      const matchIdx = contentLower.indexOf(query);
+
+      if (matchIdx !== -1) {
+        // Snippet excerpt
+        const start = Math.max(0, matchIdx - 25);
+        const end = Math.min(msg.content.length, matchIdx + query.length + 35);
+        let snippet = msg.content.substring(start, end);
+        if (start > 0) snippet = '...' + snippet;
+        if (end < msg.content.length) snippet = snippet + '...';
+
+        let chatName = msg.senderName || 'Conversation';
+        if (msg.isGroup && msg.groupId) {
+          const group = groupsMap.get(msg.groupId);
+          if (group) chatName = group.name;
+        }
+
+        matchingMessages.push({
+          messageId: msg.id,
+          conversationId: convId,
+          senderId: msg.senderId,
+          senderName: msg.senderName || 'Member',
+          senderAvatar: msg.senderAvatar,
+          content: msg.content,
+          snippet,
+          matchedTerm: query,
+          createdAt: msg.createdAt,
+          isGroup: msg.isGroup,
+          groupId: msg.groupId,
+          chatName,
+          chatAvatar: msg.senderAvatar,
+          contactId: msg.isGroup ? msg.groupId : (msg.senderId === userId ? msg.receiverId : msg.senderId),
+        });
+      }
+    });
+  });
+
+  // 2. Search matching groups by name or description
+  const matchingGroups = Array.from(groupsMap.values()).filter((g) => {
+    if (userId && !g.participants.includes(userId)) return false;
+    return (
+      g.name.toLowerCase().includes(query) ||
+      (g.description && g.description.toLowerCase().includes(query))
+    );
+  });
+
+  matchingMessages.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  res.json({
+    messages: matchingMessages.slice(0, 50),
+    groups: matchingGroups,
+  });
 });
 
 app.get('/api/architecture', (req, res) => {
@@ -677,6 +1004,145 @@ wss.on('connection', (ws: WebSocket) => {
               })
             );
           }
+          break;
+        }
+
+        // 7. Message reactions
+        case 'message:react': {
+          const { messageId, conversationId, userId, userName, emoji } = data;
+          if (!messageId || !conversationId || !userId || !emoji) break;
+
+          const msgs = conversationMessages.get(conversationId) || [];
+          const targetMsg = msgs.find((m) => m.id === messageId);
+
+          if (targetMsg) {
+            if (!targetMsg.reactions) {
+              targetMsg.reactions = [];
+            }
+
+            // Toggle logic: if user already reacted with SAME emoji, remove it. If different emoji or new, toggle/add.
+            const existingIdx = targetMsg.reactions.findIndex(
+              (r) => r.userId === userId && r.emoji === emoji
+            );
+
+            if (existingIdx >= 0) {
+              // Remove reaction
+              targetMsg.reactions.splice(existingIdx, 1);
+            } else {
+              // Remove any existing reaction from this user if one reaction per user rule, or allow multiple
+              // We'll replace user's previous reaction with the new emoji or append
+              targetMsg.reactions = targetMsg.reactions.filter((r) => r.userId !== userId);
+              targetMsg.reactions.push({ emoji, userId, userName });
+            }
+
+            // Broadcast reaction update to all connected clients
+            const broadcastPayload = JSON.stringify({
+              type: 'message:reaction_updated',
+              conversationId,
+              messageId,
+              reactions: targetMsg.reactions,
+            });
+
+            // Deliver to recipient sockets & sender
+            if (targetMsg.receiverId) {
+              const receiverSockets = clientsMap.get(targetMsg.receiverId);
+              if (receiverSockets) {
+                receiverSockets.forEach((s) => s.readyState === WebSocket.OPEN && s.send(broadcastPayload));
+              }
+            }
+
+            if (targetMsg.senderId) {
+              const senderSockets = clientsMap.get(targetMsg.senderId);
+              if (senderSockets) {
+                senderSockets.forEach((s) => s.readyState === WebSocket.OPEN && s.send(broadcastPayload));
+              }
+            }
+
+            if (targetMsg.isGroup && targetMsg.groupId) {
+              const grp = groupsMap.get(targetMsg.groupId);
+              if (grp) {
+                grp.participants.forEach((pId) => {
+                  const pSockets = clientsMap.get(pId);
+                  if (pSockets) {
+                    pSockets.forEach((s) => s.readyState === WebSocket.OPEN && s.send(broadcastPayload));
+                  }
+                });
+              }
+            }
+          }
+          break;
+        }
+
+        // 8. Message forwarding
+        case 'message:forward': {
+          const { message, selectedTargets, senderId, senderName } = data;
+          if (!message || !Array.isArray(selectedTargets) || !senderId) break;
+
+          // Limit forwarding to max 5 targets (anti-spam)
+          const validTargets = selectedTargets.slice(0, 5);
+
+          validTargets.forEach((target: { conversationId?: string; contactId?: string; groupId?: string }) => {
+            const fwdId = 'fwd_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+            const targetConversationId = target.conversationId || target.groupId || target.contactId || 'fwd_chat';
+
+            const forwardedMsg: MessagePayload = {
+              id: fwdId,
+              conversationId: targetConversationId,
+              senderId: senderId,
+              senderName: senderName || 'You',
+              receiverId: target.contactId,
+              isGroup: Boolean(target.groupId),
+              groupId: target.groupId,
+              content: message.content || '',
+              type: message.type || 'text',
+              mediaUrl: message.media_url || message.mediaUrl,
+              thumbnailUrl: message.thumbnail_url || message.thumbnailUrl,
+              mimeType: message.mime_type || message.mimeType,
+              fileSize: message.file_size || message.fileSize,
+              duration: message.duration,
+              fileName: message.file_name || message.fileName,
+              createdAt: new Date().toISOString(),
+              status: 'sent',
+              isForwarded: true,
+              forwardCount: (message.forward_count || message.forwardCount || 0) + 1,
+              originalMessageId: message.id,
+              reactions: [],
+            };
+
+            // Save to server conversation state
+            if (!conversationMessages.has(targetConversationId)) {
+              conversationMessages.set(targetConversationId, []);
+            }
+            conversationMessages.get(targetConversationId)!.push(forwardedMsg);
+
+            const sendPayload = JSON.stringify({
+              type: 'message:receive',
+              message: forwardedMsg,
+            });
+
+            // Deliver to target recipient / group
+            if (target.contactId) {
+              const rSockets = clientsMap.get(target.contactId);
+              if (rSockets) {
+                rSockets.forEach((s) => s.readyState === WebSocket.OPEN && s.send(sendPayload));
+              }
+            }
+
+            if (target.groupId) {
+              const grp = groupsMap.get(target.groupId);
+              if (grp) {
+                grp.participants.forEach((pId) => {
+                  const pSockets = clientsMap.get(pId);
+                  if (pSockets) {
+                    pSockets.forEach((s) => s.readyState === WebSocket.OPEN && s.send(sendPayload));
+                  }
+                });
+              }
+            }
+
+            // Also echo back to sender socket so UI updates immediately
+            ws.send(sendPayload);
+          });
           break;
         }
 

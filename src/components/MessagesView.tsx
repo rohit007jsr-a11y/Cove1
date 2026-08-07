@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   MessageSquare,
@@ -14,21 +14,27 @@ import {
   Wifi,
   WifiOff,
   ChevronDown,
-  Info
+  ChevronUp,
+  Search,
+  X,
+  Info,
+  CircleDot
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { UserProfile, ContactRequest, Message, Profile, ChatSummary, ReplyPreview, Group } from '../types';
+import { UserProfile, ContactRequest, Message, Profile, ChatSummary, ReplyPreview, Group, UserStatusGroup, Reaction } from '../types';
 import { CoveLogo } from './CoveLogo';
 import { ContactsView } from './ContactsView';
 import { ProfileView } from './ProfileView';
 import { AccountSettingsModal } from './AccountSettingsModal';
 import { ArchitectureModal } from './ArchitectureModal';
 import { ChatList } from './ChatList';
+import { StatusList } from './StatusList';
 import { MessageBubble } from './MessageBubble';
 import { MessageInputBar } from './MessageInputBar';
 import { CreateGroupModal } from './CreateGroupModal';
 import { GroupInfoModal } from './GroupInfoModal';
 import { MediaViewerModal } from './MediaViewerModal';
+import { ForwardModal } from './ForwardModal';
 import { realtimeChat } from '../lib/websocket';
 import {
   idbSaveMessage,
@@ -71,7 +77,8 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
-  const [sidebarView, setSidebarView] = useState<'chats' | 'contacts' | 'profile' | 'session'>('chats');
+  const [sidebarView, setSidebarView] = useState<'chats' | 'status' | 'contacts' | 'profile' | 'session'>('chats');
+  const [statusGroups, setStatusGroups] = useState<UserStatusGroup[]>([]);
   const [rightPaneView, setRightPaneView] = useState<'chat' | 'profile'>('chat');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isArchitectureOpen, setIsArchitectureOpen] = useState(false);
@@ -82,6 +89,57 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const [showScrollBottomBtn, setShowScrollBottomBtn] = useState<boolean>(false);
   const [isMediaViewerOpen, setIsMediaViewerOpen] = useState(false);
   const [selectedMediaIndex, setSelectedMediaIndex] = useState(0);
+  const [forwardModalOpen, setForwardModalOpen] = useState(false);
+  const [messageToForward, setMessageToForward] = useState<Message | null>(null);
+
+  // In-chat search states
+  const [showInChatSearch, setShowInChatSearch] = useState(false);
+  const [inChatSearchQuery, setInChatSearchQuery] = useState('');
+  const [activeMatchIndex, setActiveMatchIndex] = useState(-1);
+  const [pendingJumpMessageId, setPendingJumpMessageId] = useState<string | null>(null);
+
+  // Auto-reset search query when switching chats
+  useEffect(() => {
+    setInChatSearchQuery('');
+    setShowInChatSearch(false);
+    setActiveMatchIndex(-1);
+  }, [activeConversationId]);
+
+  // Compute matched message IDs in active thread
+  const matchingMessageIds = useMemo(() => {
+    if (!inChatSearchQuery.trim()) return [];
+    const query = inChatSearchQuery.toLowerCase();
+    return messages
+      .filter((m) => m.content && m.content.toLowerCase().includes(query))
+      .map((m) => m.id);
+  }, [messages, inChatSearchQuery]);
+
+  const handleNextMatch = () => {
+    if (matchingMessageIds.length === 0) return;
+    const nextIdx = (activeMatchIndex + 1) % matchingMessageIds.length;
+    setActiveMatchIndex(nextIdx);
+    handleJumpToMessage(matchingMessageIds[nextIdx]);
+  };
+
+  const handlePrevMatch = () => {
+    if (matchingMessageIds.length === 0) return;
+    const prevIdx = (activeMatchIndex - 1 + matchingMessageIds.length) % matchingMessageIds.length;
+    setActiveMatchIndex(prevIdx);
+    handleJumpToMessage(matchingMessageIds[prevIdx]);
+  };
+
+  // Jump scroll when selecting matching search messages
+  useEffect(() => {
+    if (pendingJumpMessageId && messages.length > 0) {
+      const exists = messages.some((m) => m.id === pendingJumpMessageId);
+      if (exists) {
+        setTimeout(() => {
+          handleJumpToMessage(pendingJumpMessageId);
+          setPendingJumpMessageId(null);
+        }, 300);
+      }
+    }
+  }, [pendingJumpMessageId, messages]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -138,6 +196,10 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         reply_to: msgData.replyTo,
         is_group: msgData.isGroup,
         group_id: msgData.groupId,
+        is_forwarded: msgData.isForwarded,
+        forward_count: msgData.forwardCount,
+        original_message_id: msgData.originalMessageId,
+        reactions: msgData.reactions || [],
       };
 
       // Save to IndexedDB
@@ -284,6 +346,19 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       );
     });
 
+    // Status/Stories real-time update handler
+    const unsubscribeStatusUpdates = realtimeChat.on('status:updated_all', () => {
+      fetchStatuses();
+    });
+
+    // Message reaction updated handler
+    const unsubscribeReaction = realtimeChat.on('reaction_updated', (data) => {
+      const { messageId, reactions } = data;
+      setMessages((prev) =>
+        prev.map((msg) => (msg.id === messageId ? { ...msg, reactions } : msg))
+      );
+    });
+
     return () => {
       unsubscribeMsg();
       unsubscribeStatus();
@@ -291,8 +366,28 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       unsubscribeTyping();
       unsubscribeGroupCreated();
       unsubscribeGroupUpdated();
+      unsubscribeStatusUpdates();
+      unsubscribeReaction();
     };
   }, [activeConversationId, user.id]);
+
+  const fetchStatuses = async () => {
+    try {
+      const res = await fetch(`/api/statuses?userId=${user.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.groups) {
+          setStatusGroups(data.groups);
+        }
+      }
+    } catch (err) {
+      console.warn('Error fetching statuses:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchStatuses();
+  }, [user.id]);
 
   // Flush offline pending queue
   const flushPendingOfflineQueue = async () => {
@@ -636,6 +731,69 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     setIsMediaViewerOpen(true);
   };
 
+  // React to message with emoji
+  const handleReact = (message: Message, emoji: string) => {
+    if (!activeConversationId) return;
+    const userName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
+
+    // Optimistic local UI update
+    setMessages((prev) =>
+      prev.map((msg) => {
+        if (msg.id !== message.id) return msg;
+        const currentReactions = msg.reactions || [];
+        const existingIdx = currentReactions.findIndex(
+          (r) => r.userId === user.id && r.emoji === emoji
+        );
+
+        let updated: Reaction[];
+        if (existingIdx >= 0) {
+          updated = currentReactions.filter((_, idx) => idx !== existingIdx);
+        } else {
+          updated = currentReactions.filter((r) => r.userId !== user.id);
+          updated.push({ emoji, userId: user.id, userName });
+        }
+        return { ...msg, reactions: updated };
+      })
+    );
+
+    // Send via WebSocket
+    realtimeChat.sendReaction(message.id, activeConversationId, user.id, userName, emoji);
+  };
+
+  // Open forward modal
+  const handleOpenForwardModal = (message: Message) => {
+    setMessageToForward(message);
+    setForwardModalOpen(true);
+  };
+
+  // Confirm forward message to selected targets
+  const handleConfirmForward = (selectedTargets: any[]) => {
+    if (!messageToForward) return;
+    const senderName = user.user_metadata?.full_name || 'You';
+    realtimeChat.forwardMessage(messageToForward, selectedTargets, user.id, senderName);
+    showToast('success', 'Message Forwarded', `Forwarded to ${selectedTargets.length} chat(s).`);
+  };
+
+  // Delete message locally
+  const handleDeleteMessage = (messageId: string) => {
+    setMessages((prev) => prev.filter((m) => m.id !== messageId));
+    showToast('info', 'Message Deleted', 'Removed from conversation view.');
+  };
+
+  // Jump to quoted message and flash highlight
+  const handleJumpToMessage = (messageId: string) => {
+    const el = document.getElementById(`msg-${messageId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('ring-4', 'ring-sky-400', 'bg-sky-100/90', 'rounded-2xl', 'transition-all', 'duration-500');
+      setTimeout(() => {
+        el.classList.remove('ring-4', 'ring-sky-400', 'bg-sky-100/90');
+      }, 2000);
+    } else {
+      showToast('info', 'Quoted Message', 'Quoted message is earlier in history.');
+    }
+  };
+
   const handleSendMessage = async (
     text: string,
     type: any = 'text',
@@ -976,9 +1134,119 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         {/* 1. Left Sidebar Navigation Panel */}
         <div
           className={`${
-            selectedContact ? 'hidden md:flex' : 'flex'
+            selectedContact || selectedGroup ? 'hidden md:flex' : 'flex'
           } flex-col w-full md:w-[340px] lg:w-[380px] border-r border-slate-200 bg-slate-50/70 shrink-0 h-full overflow-hidden`}
         >
+          {/* Top User Profile Header */}
+          <div className="px-4 py-3 border-b border-slate-200 bg-white flex items-center justify-between shrink-0 shadow-2xs">
+            <div
+              onClick={() => setSidebarView('profile')}
+              className="flex items-center gap-3 overflow-hidden cursor-pointer group p-1 -ml-1 rounded-xl hover:bg-slate-100 transition-colors"
+            >
+              <div className="relative shrink-0">
+                {user.user_metadata?.avatar_url ? (
+                  <img
+                    src={user.user_metadata.avatar_url}
+                    alt="Avatar"
+                    className="w-9 h-9 rounded-full object-cover border border-sky-500/30"
+                  />
+                ) : (
+                  <div className="w-9 h-9 rounded-full bg-sky-500 text-white font-bold text-xs flex items-center justify-center shadow-xs">
+                    {(user.user_metadata?.full_name || user.email || 'U').slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+                <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white" />
+              </div>
+              <div className="overflow-hidden">
+                <h2 className="font-bold text-sm text-slate-900 group-hover:text-sky-600 truncate leading-tight">
+                  {user.user_metadata?.full_name || user.email?.split('@')[0] || 'Cove Member'}
+                </h2>
+                <span className="text-[10px] text-sky-600 font-mono font-medium truncate">
+                  @{user.user_metadata?.username || user.email?.split('@')[0] || 'user'}
+                </span>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={() => setIsArchitectureOpen(true)}
+                className="p-2 rounded-full hover:bg-slate-100 text-slate-600 hover:text-sky-600 transition-colors relative"
+                title="Architecture System & Specifications"
+              >
+                <Layers className="w-4 h-4 text-sky-500" />
+              </button>
+              <button
+                onClick={() => setSidebarView('profile')}
+                className="p-2 rounded-full hover:bg-slate-100 text-slate-600 hover:text-sky-600 transition-colors"
+                title="My Profile"
+              >
+                <User className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setIsSettingsOpen(true)}
+                className="p-2 rounded-full hover:bg-slate-100 text-slate-600 hover:text-sky-600 transition-colors"
+                title="Settings"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+              <button
+                onClick={onSignOut}
+                className="p-2 hover:bg-rose-50 rounded-full text-slate-500 hover:text-rose-600 transition-colors"
+                title="Sign Out"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Sub-Header Navigation Tabs: Chats | Status | Directory */}
+          <div className="flex items-center border-b border-slate-200 bg-slate-100/80 p-1 gap-1 shrink-0">
+            <button
+              onClick={() => setSidebarView('chats')}
+              className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                sidebarView === 'chats'
+                  ? 'bg-white text-sky-600 shadow-2xs'
+                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/60'
+              }`}
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>Chats</span>
+              {chatSummaries.reduce((a, b) => a + (b.unread_count || 0), 0) > 0 && (
+                <span className="px-1.5 py-0.2 bg-sky-500 text-white text-[9px] font-extrabold rounded-full">
+                  {chatSummaries.reduce((a, b) => a + (b.unread_count || 0), 0)}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setSidebarView('status')}
+              className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all relative ${
+                sidebarView === 'status'
+                  ? 'bg-white text-sky-600 shadow-2xs'
+                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/60'
+              }`}
+            >
+              <CircleDot className="w-3.5 h-3.5 text-emerald-500" />
+              <span>Status</span>
+              {statusGroups.some((g) => g.ownerId !== user.id && g.hasUnviewed) && (
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              )}
+            </button>
+
+            <button
+              onClick={() => setSidebarView('contacts')}
+              className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                sidebarView === 'contacts'
+                  ? 'bg-white text-sky-600 shadow-2xs'
+                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/60'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Directory</span>
+            </button>
+          </div>
+
           <AnimatePresence mode="wait">
             {sidebarView === 'chats' && (
               <motion.div
@@ -986,83 +1254,13 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -10 }}
-                className="flex flex-col h-full"
+                className="flex flex-col flex-1 overflow-hidden"
               >
-                {/* Header */}
-                <div className="px-4 py-3 border-b border-slate-200 bg-white flex items-center justify-between shrink-0 shadow-2xs">
-                  <div
-                    onClick={() => setSidebarView('profile')}
-                    className="flex items-center gap-3 overflow-hidden cursor-pointer group p-1 -ml-1 rounded-xl hover:bg-slate-100 transition-colors"
-                  >
-                    <div className="relative shrink-0">
-                      {user.user_metadata?.avatar_url ? (
-                        <img
-                          src={user.user_metadata.avatar_url}
-                          alt="Avatar"
-                          className="w-9 h-9 rounded-full object-cover border border-sky-500/30"
-                        />
-                      ) : (
-                        <div className="w-9 h-9 rounded-full bg-sky-500 text-white font-bold text-xs flex items-center justify-center shadow-xs">
-                          {(user.user_metadata?.full_name || user.email || 'U').slice(0, 2).toUpperCase()}
-                        </div>
-                      )}
-                      <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white" />
-                    </div>
-                    <div className="overflow-hidden">
-                      <h2 className="font-bold text-sm text-slate-900 group-hover:text-sky-600 truncate leading-tight">
-                        {user.user_metadata?.full_name || user.email?.split('@')[0] || 'Cove Member'}
-                      </h2>
-                      <span className="text-[10px] text-sky-600 font-mono font-medium truncate">
-                        @{user.user_metadata?.username || user.email?.split('@')[0] || 'user'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={() => setIsArchitectureOpen(true)}
-                      className="p-2 rounded-full hover:bg-slate-100 text-slate-600 hover:text-sky-600 transition-colors relative"
-                      title="Architecture System & Specifications"
-                    >
-                      <Layers className="w-4 h-4 text-sky-500" />
-                    </button>
-                    <button
-                      onClick={() => setSidebarView('profile')}
-                      className="p-2 rounded-full hover:bg-slate-100 text-slate-600 hover:text-sky-600 transition-colors"
-                      title="My WhatsApp Profile"
-                    >
-                      <User className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => setSidebarView('contacts')}
-                      className="p-2 rounded-full hover:bg-slate-100 text-slate-600 hover:text-sky-600 transition-colors"
-                      title="Find Contacts & Directory"
-                    >
-                      <Users className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => setIsSettingsOpen(true)}
-                      className="p-2 rounded-full hover:bg-slate-100 text-slate-600 hover:text-sky-600 transition-colors"
-                      title="Settings"
-                    >
-                      <Settings className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={onSignOut}
-                      className="p-2 hover:bg-rose-50 rounded-full text-slate-500 hover:text-rose-600 transition-colors"
-                      title="Sign Out"
-                    >
-                      <LogOut className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-
                 {/* Chat List */}
                 <ChatList
                   chats={chatSummaries}
                   selectedContactId={selectedGroup ? selectedGroup.id : selectedContact?.id || null}
-                  onSelectChat={(chat) => {
+                  onSelectChat={(chat, jumpMessageId) => {
                     if (chat.is_group && chat.group) {
                       setSelectedGroup(chat.group);
                       setSelectedContact(null);
@@ -1073,12 +1271,50 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                         setSelectedGroup(null);
                       }
                     }
+                    if (jumpMessageId) {
+                      setPendingJumpMessageId(jumpMessageId);
+                      setShowInChatSearch(true);
+                      const matchingMsg = messages.find((m) => m.id === jumpMessageId);
+                      if (matchingMsg && matchingMsg.content) {
+                        setInChatSearchQuery(matchingMsg.content);
+                      }
+                    }
                     setSidebarView('chats');
                   }}
                   searchQuery={searchQuery}
                   onSearchChange={setSearchQuery}
                   onOpenDirectory={() => setSidebarView('contacts')}
                   onOpenCreateGroup={() => setIsCreateGroupOpen(true)}
+                  currentUserId={user.id}
+                />
+              </motion.div>
+            )}
+
+            {sidebarView === 'status' && (
+              <motion.div
+                key="status"
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 10 }}
+                className="flex flex-col flex-1 overflow-hidden"
+              >
+                <StatusList
+                  currentUserId={user.id}
+                  currentUserName={user.user_metadata?.full_name || user.email?.split('@')[0] || 'Cove User'}
+                  currentUserAvatar={user.user_metadata?.avatar_url}
+                  statusGroups={statusGroups}
+                  onRefreshStatuses={fetchStatuses}
+                  onReplyToStatus={(statusOwnerId, text) => {
+                    const contact = contacts.find(
+                      (c) => c.profile?.id === statusOwnerId || c.requester_id === statusOwnerId || c.addressee_id === statusOwnerId
+                    );
+                    if (contact) {
+                      setSelectedContact(contact);
+                      setSelectedGroup(null);
+                      setSidebarView('chats');
+                      showToast('success', 'Status Reply', `Opened chat with ${contact.profile?.display_name || 'contact'}`);
+                    }
+                  }}
                 />
               </motion.div>
             )}
@@ -1174,6 +1410,17 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
                 <div className="flex items-center gap-2">
                   <button
+                    onClick={() => setShowInChatSearch(!showInChatSearch)}
+                    className={`p-2 rounded-xl transition-all ${
+                      showInChatSearch
+                        ? 'bg-amber-100 text-amber-700 shadow-3xs border border-amber-200'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                    }`}
+                    title="Search keywords in this chat"
+                  >
+                    <Search className="w-4 h-4" />
+                  </button>
+                  <button
                     onClick={() => setIsGroupInfoOpen(true)}
                     className="px-3 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-700 text-xs font-bold flex items-center gap-1.5 transition-colors border border-sky-200"
                   >
@@ -1182,6 +1429,85 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                   </button>
                 </div>
               </div>
+
+              {/* In-Chat Search Panel */}
+              <AnimatePresence>
+                {showInChatSearch && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="overflow-hidden bg-amber-50/90 border-b border-amber-200/60 px-4 py-2.5 flex items-center justify-between gap-3 shrink-0"
+                  >
+                    <div className="flex items-center gap-2 flex-1 max-w-md bg-white border border-amber-200 rounded-xl px-3 py-1.5 shadow-3xs">
+                      <Search className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <input
+                        type="text"
+                        placeholder="Search keywords in this chat..."
+                        value={inChatSearchQuery}
+                        onChange={(e) => {
+                          setInChatSearchQuery(e.target.value);
+                          setActiveMatchIndex(e.target.value.trim() ? 0 : -1);
+                        }}
+                        className="w-full bg-transparent border-none text-xs text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-0"
+                        autoFocus
+                      />
+                      {inChatSearchQuery && (
+                        <button
+                          onClick={() => {
+                            setInChatSearchQuery('');
+                            setActiveMatchIndex(-1);
+                          }}
+                          className="p-0.5 hover:bg-amber-100 rounded-full transition-colors"
+                        >
+                          <X className="w-3.5 h-3.5 text-amber-600" />
+                        </button>
+                      )}
+                    </div>
+
+                    {matchingMessageIds.length > 0 && (
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[11px] font-bold text-amber-800 font-mono bg-amber-100 px-2 py-0.5 rounded-md border border-amber-200">
+                          {activeMatchIndex + 1} of {matchingMessageIds.length} matches
+                        </span>
+                        <div className="flex items-center bg-white rounded-xl border border-amber-200 overflow-hidden shadow-3xs">
+                          <button
+                            onClick={handlePrevMatch}
+                            className="p-1.5 hover:bg-amber-50 text-amber-800 border-r border-amber-200 transition-colors"
+                            title="Previous match"
+                          >
+                            <ChevronUp className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={handleNextMatch}
+                            className="p-1.5 hover:bg-amber-50 text-amber-800 transition-colors"
+                            title="Next match"
+                          >
+                            <ChevronDown className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {inChatSearchQuery && matchingMessageIds.length === 0 && (
+                      <span className="text-[11px] font-bold text-slate-500 shrink-0 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                        No matches found
+                      </span>
+                    )}
+
+                    <button
+                      onClick={() => {
+                        setShowInChatSearch(false);
+                        setInChatSearchQuery('');
+                        setActiveMatchIndex(-1);
+                      }}
+                      className="p-1 hover:bg-amber-100 rounded-lg text-amber-800 shrink-0 transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {/* Messages Feed Area */}
               <div
@@ -1208,12 +1534,25 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                   <div className="space-y-3 flex-1">
                     {messages.map((msg) => {
                       const isMe = msg.sender_id === user.id;
+                      const isActiveMatch =
+                        matchingMessageIds.length > 0 &&
+                        activeMatchIndex !== -1 &&
+                        matchingMessageIds[activeMatchIndex] === msg.id;
+
                       return (
                         <MessageBubble
                           key={msg.id}
                           message={msg}
                           isOwn={isMe}
+                          currentUserId={user.id}
+                          currentUserName={user.user_metadata?.full_name || 'Member'}
+                          searchQuery={inChatSearchQuery}
+                          isActiveMatch={isActiveMatch}
                           onOpenMediaViewer={handleOpenMediaViewer}
+                          onReact={handleReact}
+                          onForward={handleOpenForwardModal}
+                          onDelete={handleDeleteMessage}
+                          onJumpToMessage={handleJumpToMessage}
                           onReply={(replyMsg) => {
                             setReplyingTo({
                               id: replyMsg.id,
@@ -1298,6 +1637,17 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
                   <div className="flex items-center gap-2">
                     <button
+                      onClick={() => setShowInChatSearch(!showInChatSearch)}
+                      className={`p-1.5 rounded-xl transition-all ${
+                        showInChatSearch
+                          ? 'bg-amber-100 text-amber-700 shadow-3xs border border-amber-200'
+                          : 'hover:bg-slate-200 text-slate-600'
+                      }`}
+                      title="Search keywords in this chat"
+                    >
+                      <Search className="w-4 h-4" />
+                    </button>
+                    <button
                       onClick={() => setIsArchitectureOpen(true)}
                       className="px-2.5 py-1 rounded-full bg-sky-50 hover:bg-sky-100 text-sky-700 text-[10px] font-bold flex items-center gap-1.5 transition-colors border border-sky-200/60"
                       title="Architecture Specs"
@@ -1314,6 +1664,85 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                     </button>
                   </div>
                 </div>
+
+                {/* In-Chat Search Panel */}
+                <AnimatePresence>
+                  {showInChatSearch && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden bg-amber-50/90 border-b border-amber-200/60 px-4 py-2.5 flex items-center justify-between gap-3 shrink-0"
+                    >
+                      <div className="flex items-center gap-2 flex-1 max-w-md bg-white border border-amber-200 rounded-xl px-3 py-1.5 shadow-3xs">
+                        <Search className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        <input
+                          type="text"
+                          placeholder="Search keywords in this chat..."
+                          value={inChatSearchQuery}
+                          onChange={(e) => {
+                            setInChatSearchQuery(e.target.value);
+                            setActiveMatchIndex(e.target.value.trim() ? 0 : -1);
+                          }}
+                          className="w-full bg-transparent border-none text-xs text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-0"
+                          autoFocus
+                        />
+                        {inChatSearchQuery && (
+                          <button
+                            onClick={() => {
+                              setInChatSearchQuery('');
+                              setActiveMatchIndex(-1);
+                            }}
+                            className="p-0.5 hover:bg-amber-100 rounded-full transition-colors"
+                          >
+                            <X className="w-3.5 h-3.5 text-amber-600" />
+                          </button>
+                        )}
+                      </div>
+
+                      {matchingMessageIds.length > 0 && (
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-[11px] font-bold text-amber-800 font-mono bg-amber-100 px-2 py-0.5 rounded-md border border-amber-200">
+                            {activeMatchIndex + 1} of {matchingMessageIds.length} matches
+                          </span>
+                          <div className="flex items-center bg-white rounded-xl border border-amber-200 overflow-hidden shadow-3xs">
+                            <button
+                              onClick={handlePrevMatch}
+                              className="p-1.5 hover:bg-amber-50 text-amber-800 border-r border-amber-200 transition-colors"
+                              title="Previous match"
+                            >
+                              <ChevronUp className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={handleNextMatch}
+                              className="p-1.5 hover:bg-amber-50 text-amber-800 transition-colors"
+                              title="Next match"
+                            >
+                              <ChevronDown className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {inChatSearchQuery && matchingMessageIds.length === 0 && (
+                        <span className="text-[11px] font-bold text-slate-500 shrink-0 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                          No matches found
+                        </span>
+                      )}
+
+                      <button
+                        onClick={() => {
+                          setShowInChatSearch(false);
+                          setInChatSearchQuery('');
+                          setActiveMatchIndex(-1);
+                        }}
+                        className="p-1 hover:bg-amber-100 rounded-lg text-amber-800 shrink-0 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 {/* Messages Feed Area */}
                 <div
@@ -1340,12 +1769,25 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                     <div className="space-y-3 flex-1">
                       {messages.map((msg) => {
                         const isMe = msg.sender_id === user.id;
+                        const isActiveMatch =
+                          matchingMessageIds.length > 0 &&
+                          activeMatchIndex !== -1 &&
+                          matchingMessageIds[activeMatchIndex] === msg.id;
+
                         return (
                           <MessageBubble
                             key={msg.id}
                             message={msg}
                             isOwn={isMe}
+                            currentUserId={user.id}
+                            currentUserName={user.user_metadata?.full_name || 'Member'}
+                            searchQuery={inChatSearchQuery}
+                            isActiveMatch={isActiveMatch}
                             onOpenMediaViewer={handleOpenMediaViewer}
+                            onReact={handleReact}
+                            onForward={handleOpenForwardModal}
+                            onDelete={handleDeleteMessage}
+                            onJumpToMessage={handleJumpToMessage}
                             onReply={(replyMsg) => {
                               setReplyingTo({
                                 id: replyMsg.id,
@@ -1470,6 +1912,17 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         onClose={() => setIsMediaViewerOpen(false)}
         mediaItems={threadMediaItems}
         initialIndex={selectedMediaIndex}
+      />
+
+      {/* Forward Message Modal */}
+      <ForwardModal
+        isOpen={forwardModalOpen}
+        onClose={() => setForwardModalOpen(false)}
+        messageToForward={messageToForward}
+        contacts={contacts}
+        groups={groups}
+        currentUserId={user.id}
+        onForward={handleConfirmForward}
       />
     </div>
   );

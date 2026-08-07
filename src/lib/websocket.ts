@@ -29,6 +29,8 @@ class RealtimeChatClient {
     this.eventListeners.set('sync_complete', new Set());
     this.eventListeners.set('group:created', new Set());
     this.eventListeners.set('group:updated', new Set());
+    this.eventListeners.set('status:updated_all', new Set());
+    this.eventListeners.set('reaction_updated', new Set());
   }
 
   /**
@@ -152,6 +154,16 @@ class RealtimeChatClient {
 
       case 'group:updated':
         this.emit('group:updated', data);
+        break;
+
+      case 'status:created':
+      case 'status:viewed':
+      case 'status:deleted':
+        this.emit('status:updated_all', data);
+        break;
+
+      case 'message:reaction_updated':
+        this.emit('reaction_updated', data);
         break;
 
       default:
@@ -307,9 +319,44 @@ class RealtimeChatClient {
   }
 
   /**
+   * Send Message Reaction over WebSocket
+   */
+  public sendReaction(messageId: string, conversationId: string, userId: string, userName: string, emoji: string) {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(
+        JSON.stringify({
+          type: 'message:react',
+          messageId,
+          conversationId,
+          userId,
+          userName,
+          emoji,
+        })
+      );
+    }
+  }
+
+  /**
+   * Forward Message to targets over WebSocket
+   */
+  public forwardMessage(message: Message, selectedTargets: any[], senderId: string, senderName?: string) {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(
+        JSON.stringify({
+          type: 'message:forward',
+          message,
+          selectedTargets,
+          senderId,
+          senderName,
+        })
+      );
+    }
+  }
+
+  /**
    * Event Listener Subscriptions
    */
-  public on(event: 'connect' | 'disconnect' | 'message' | 'status' | 'read_receipt' | 'typing' | 'presence' | 'sync_complete' | 'group:created' | 'group:updated', callback: EventCallback) {
+  public on(event: 'connect' | 'disconnect' | 'message' | 'status' | 'read_receipt' | 'typing' | 'presence' | 'sync_complete' | 'group:created' | 'group:updated' | 'status:updated_all' | 'reaction_updated', callback: EventCallback) {
     if (!this.eventListeners.has(event)) {
       this.eventListeners.set(event, new Set());
     }

@@ -81,6 +81,12 @@ export interface ReplyPreview {
   content: string;
 }
 
+export interface Reaction {
+  emoji: string;
+  userId: string;
+  userName?: string;
+}
+
 export interface Message {
   id: string;
   conversation_id: string;
@@ -102,6 +108,32 @@ export interface Message {
   status?: MessageStatus;
   read_at?: string | null;
   reply_to?: ReplyPreview | null;
+  reactions?: Reaction[];
+  is_forwarded?: boolean;
+  forward_count?: number;
+  original_message_id?: string;
+}
+
+export interface MessageSearchResult {
+  messageId: string;
+  conversationId: string;
+  senderId: string;
+  senderName: string;
+  senderAvatar?: string;
+  content: string;
+  snippet: string;
+  matchedTerm: string;
+  createdAt: string;
+  isGroup?: boolean;
+  groupId?: string;
+  chatName: string;
+  chatAvatar?: string;
+  contactId?: string;
+}
+
+export interface GlobalSearchResults {
+  chats: ChatSummary[];
+  messages: MessageSearchResult[];
 }
 
 export interface ChatSummary {
@@ -122,6 +154,41 @@ export interface ToastMessage {
   type: 'success' | 'error' | 'info';
   title: string;
   message?: string;
+}
+
+export type StatusPrivacy = 'all' | 'contacts' | 'except';
+
+export interface StatusViewer {
+  userId: string;
+  userName: string;
+  userAvatar?: string;
+  viewedAt: string;
+}
+
+export interface StatusItem {
+  id: string;
+  ownerId: string;
+  ownerName: string;
+  ownerAvatar?: string;
+  type: 'text' | 'image' | 'video';
+  contentUrl?: string;
+  text?: string;
+  bgColor?: string;
+  caption?: string;
+  createdAt: string;
+  expiresAt: string;
+  privacy: StatusPrivacy;
+  viewers: StatusViewer[];
+}
+
+export interface UserStatusGroup {
+  ownerId: string;
+  ownerName: string;
+  ownerAvatar?: string;
+  isOwn: boolean;
+  hasUnviewed: boolean;
+  lastUpdated: string;
+  statuses: StatusItem[];
 }
 
 
