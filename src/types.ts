@@ -46,13 +46,75 @@ export interface ConversationParticipant {
   user_id: string;
 }
 
+export type MessageStatus = 'sending' | 'sent' | 'delivered' | 'read';
+export type MessageType = 'text' | 'image' | 'video' | 'document' | 'voice' | 'voice_note' | 'file' | 'system';
+
+export interface GroupSettings {
+  onlyAdminsCanSend: boolean;
+  onlyAdminsCanEditInfo: boolean;
+}
+
+export interface GroupMember {
+  userId: string;
+  role: 'creator' | 'admin' | 'member';
+  joinedAt: string;
+  profile?: Profile;
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  description?: string;
+  creatorId: string;
+  avatarUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+  participants: string[]; // array of user IDs
+  admins: string[]; // array of user IDs
+  settings: GroupSettings;
+  members?: GroupMember[];
+}
+
+export interface ReplyPreview {
+  id: string;
+  sender_name: string;
+  content: string;
+}
+
 export interface Message {
   id: string;
   conversation_id: string;
   sender_id: string;
+  sender_name?: string;
+  sender_avatar?: string;
+  receiver_id?: string;
+  is_group?: boolean;
+  group_id?: string;
   content: string;
+  type?: MessageType;
+  media_url?: string;
+  thumbnail_url?: string;
+  mime_type?: string;
+  file_size?: number;
+  duration?: number;
+  file_name?: string;
   created_at: string;
+  status?: MessageStatus;
   read_at?: string | null;
+  reply_to?: ReplyPreview | null;
+}
+
+export interface ChatSummary {
+  contact_id: string;
+  conversation_id: string;
+  profile: Profile;
+  is_group?: boolean;
+  group?: Group;
+  last_message?: Message | null;
+  unread_count: number;
+  is_online: boolean;
+  is_typing: boolean;
+  updated_at: string;
 }
 
 export interface ToastMessage {
@@ -61,5 +123,6 @@ export interface ToastMessage {
   title: string;
   message?: string;
 }
+
 
 
