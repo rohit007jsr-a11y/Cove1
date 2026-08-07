@@ -26,10 +26,11 @@ export const NotificationToast: React.FC<NotificationToastProps> = ({ toast, onC
   return (
     <AnimatePresence>
       <motion.div
-        initial={{ opacity: 0, y: -20, scale: 0.95 }}
+        initial={{ opacity: 0, y: -24, scale: 0.94 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: -20, scale: 0.95 }}
-        className={`fixed top-5 right-5 z-50 max-w-md w-full p-4 rounded-lg border shadow-lg flex items-start gap-3 ${borders[toast.type]}`}
+        exit={{ opacity: 0, y: -20, scale: 0.94 }}
+        transition={{ type: 'spring', stiffness: 420, damping: 28 }}
+        className={`fixed top-5 right-5 z-50 max-w-md w-full p-4 rounded-xl border shadow-xl flex items-start gap-3 ${borders[toast.type]}`}
       >
         {icons[toast.type]}
         <div className="flex-1 pr-2">

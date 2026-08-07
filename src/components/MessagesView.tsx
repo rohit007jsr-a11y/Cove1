@@ -31,6 +31,12 @@ import {
   cacheContactsList,
   getCachedContactsList,
 } from '../lib/cache';
+import {
+  MessageBubbleEnter,
+  ListItemEnter,
+  TypingDot,
+  whatsappSpring,
+} from './animations/Animations';
 
 interface MessagesViewProps {
   user: UserProfile;
@@ -645,38 +651,39 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                     </button>
                   </div>
                 ) : (
-                  filteredContacts.map((contact) => {
+                  filteredContacts.map((contact, idx) => {
                     const isSelected = selectedContact?.id === contact.id;
                     return (
-                      <button
-                        key={contact.id}
-                        onClick={() => {
-                          setSelectedContact(contact);
-                          setSidebarView('chats');
-                        }}
-                        className={`w-full text-left p-3 rounded-xl transition-all flex items-center gap-3 border ${
-                          isSelected
-                            ? 'bg-white border-sky-500/30 shadow-xs text-slate-900'
-                            : 'hover:bg-white/80 border-transparent text-slate-700'
-                        }`}
-                      >
-                        <div className="w-10 h-10 rounded-full bg-sky-500/10 text-sky-600 font-bold text-sm flex items-center justify-center shrink-0 border border-sky-500/20">
-                          {getContactInitials(contact)}
-                        </div>
-                        <div className="overflow-hidden flex-1">
-                          <div className="flex items-center justify-between gap-1">
-                            <span className="font-bold text-xs truncate text-slate-900">
-                              {getContactName(contact)}
-                            </span>
-                            <span className="text-[9px] text-slate-400 font-medium shrink-0">
-                              Active
-                            </span>
+                      <ListItemEnter key={contact.id} index={idx}>
+                        <button
+                          onClick={() => {
+                            setSelectedContact(contact);
+                            setSidebarView('chats');
+                          }}
+                          className={`w-full text-left p-3 rounded-xl transition-all flex items-center gap-3 border ${
+                            isSelected
+                              ? 'bg-white border-sky-500/30 shadow-xs text-slate-900'
+                              : 'hover:bg-white/80 border-transparent text-slate-700'
+                          }`}
+                        >
+                          <div className="w-10 h-10 rounded-full bg-sky-500/10 text-sky-600 font-bold text-sm flex items-center justify-center shrink-0 border border-sky-500/20">
+                            {getContactInitials(contact)}
                           </div>
-                          <p className="text-[11px] text-slate-500 truncate mt-0.5">
-                            {getContactEmail(contact)}
-                          </p>
-                        </div>
-                      </button>
+                          <div className="overflow-hidden flex-1">
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="font-bold text-xs truncate text-slate-900">
+                                {getContactName(contact)}
+                              </span>
+                              <span className="text-[9px] text-slate-400 font-medium shrink-0">
+                                Active
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                              {getContactEmail(contact)}
+                            </p>
+                          </div>
+                        </button>
+                      </ListItemEnter>
                     );
                   })
                 )}
@@ -881,8 +888,9 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                     const isMe = msg.sender_id === user.id;
                     const isPending = msg.id?.startsWith('temp');
                     return (
-                      <div
+                      <MessageBubbleEnter
                         key={msg.id}
+                        isOwn={isMe}
                         className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'}`}
                       >
                         <div
@@ -907,7 +915,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                             {isMe && (
                               <span
                                 key={isPending ? 'pending' : 'sent'}
-                                className="flex items-center ml-0.5 shrink-0 animate-tick-pop transition-all duration-300"
+                                className="flex items-center ml-0.5 shrink-0 transition-all duration-300"
                                 title={isPending ? 'Sending...' : 'Sent & Delivered'}
                               >
                                 {isPending ? (
@@ -919,7 +927,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                             )}
                           </div>
                         </div>
-                      </div>
+                      </MessageBubbleEnter>
                     );
                   })}
                   <div ref={messagesEndRef} />

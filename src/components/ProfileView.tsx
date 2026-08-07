@@ -220,7 +220,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     const otherAvatar = otherProfile.avatar_url;
 
     return (
-      <div className="flex flex-col h-full bg-slate-50 font-sans select-none overflow-y-auto">
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -10 }}
+        transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
+        className="flex flex-col h-full bg-slate-50 font-sans select-none overflow-y-auto"
+      >
         {/* Top Bar Header */}
         <div className="px-4 py-3.5 bg-slate-900 text-white flex items-center gap-3 shrink-0 shadow-md">
           {onBack && (
@@ -348,13 +354,19 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </button>
           </div>
         </div>
-      </div>
+      </motion.div>
     );
   }
 
   // Self Profile Editor & View (WhatsApp Style)
   return (
-    <div className="flex flex-col h-full bg-slate-50 font-sans select-none overflow-y-auto">
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -10 }}
+      transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
+      className="flex flex-col h-full bg-slate-50 font-sans select-none overflow-y-auto"
+    >
       {/* Top Header */}
       <div className="px-4 py-3.5 bg-slate-900 text-white flex items-center justify-between shrink-0 shadow-md">
         <div className="flex items-center gap-3">
@@ -713,6 +725,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           )}
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 };
