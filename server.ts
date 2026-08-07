@@ -3,6 +3,18 @@ import http from 'http';
 import path from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
+import {
+  getPublicKey,
+  addSubscription,
+  removeSubscription,
+  getSettings,
+  updateSettings,
+  toggleMuteChat,
+  sendPushNotification,
+  broadcastPushNotification,
+  broadcastStatusUpdatePush,
+} from './server/notifications';
+
 
 interface ChatClient {
   userId: string;
@@ -305,6 +317,11 @@ app.post('/api/statuses', (req, res) => {
   broadcastToAll({
     type: 'status:created',
     status: newStatus,
+  });
+
+  // Send push notifications for status updates asynchronously
+  broadcastStatusUpdatePush(ownerId, ownerName).catch((err) => {
+    console.error('[StatusPush] Failed to broadcast status push:', err);
   });
 
   res.json({ success: true, status: newStatus });
@@ -664,12 +681,125 @@ app.get('/api/search', (req, res) => {
   });
 
   matchingMessages.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
   res.json({
     messages: matchingMessages.slice(0, 50),
     groups: matchingGroups,
   });
 });
+
+app.get('/api/notifications/vapid-public-key', (req, res) => {
+  res.json({ publicKey: getPublicKey() });
+});
+
+app.post('/api/notifications/subscribe', (req, res) => {
+  const { userId, subscription } = req.body;
+  if (!userId || !subscription) {
+    return res.status(400).json({ error: 'Missing userId or subscription' });
+  }
+  addSubscription(userId, subscription);
+  res.json({ success: true });
+});
+
+app.post('/api/notifications/unsubscribe', (req, res) => {
+  const { userId, endpoint } = req.body;
+  if (!userId || !endpoint) {
+    return res.status(400).json({ error: 'Missing userId or endpoint' });
+  }
+  removeSubscription(userId, endpoint);
+  res.json({ success: true });
+});
+
+app.get('/api/notifications/settings', (req, res) => {
+  const userId = req.query.userId as string;
+  if (!userId) {
+    return res.status(400).json({ error: 'Missing userId' });
+  }
+  res.json({ settings: getSettings(userId) });
+});
+
+app.post('/api/notifications/settings', (req, res) => {
+  const { userId, settings } = req.body;
+  if (!userId || !settings) {
+    return res.status(400).json({ error: 'Missing userId or settings' });
+  }
+  const updated = updateSettings(userId, settings);
+  res.json({ success: true, settings: updated });
+});
+
+app.post('/api/notifications/mute', (req, res) => {
+  const { userId, chatId } = req.body;
+  if (!userId || !chatId) {
+    return res.status(400).json({ error: 'Missing userId or chatId' });
+  }
+  const result = toggleMuteChat(userId, chatId);
+  res.json({ success: true, ...result });
+});
+
+// Privacy Settings Map (In-Memory persistence)
+const privacySettingsMap = new Map<string, {
+  userId: string;
+  profilePhotoVisibility: 'everyone' | 'contacts' | 'nobody';
+  aboutVisibility: 'everyone' | 'contacts' | 'nobody';
+  lastSeenVisibility: 'everyone' | 'contacts' | 'nobody';
+  statusVisibility: 'everyone' | 'contacts' | 'nobody';
+  blockedUsers: string[];
+}>();
+
+function getPrivacySettings(userId: string) {
+  if (!privacySettingsMap.has(userId)) {
+    privacySettingsMap.set(userId, {
+      userId,
+      profilePhotoVisibility: 'everyone',
+      aboutVisibility: 'everyone',
+      lastSeenVisibility: 'everyone',
+      statusVisibility: 'everyone',
+      blockedUsers: [],
+    });
+  }
+  return privacySettingsMap.get(userId)!;
+}
+
+// REST API for Privacy and Block Lists
+app.get('/api/privacy/settings', (req, res) => {
+  const userId = req.query.userId as string;
+  if (!userId) {
+    return res.status(400).json({ error: 'Missing userId' });
+  }
+  res.json({ settings: getPrivacySettings(userId) });
+});
+
+app.post('/api/privacy/settings', (req, res) => {
+  const { userId, settings } = req.body;
+  if (!userId || !settings) {
+    return res.status(400).json({ error: 'Missing userId or settings' });
+  }
+  const current = getPrivacySettings(userId);
+  const updated = { ...current, ...settings };
+  privacySettingsMap.set(userId, updated);
+  res.json({ success: true, settings: updated });
+});
+
+app.post('/api/privacy/block', (req, res) => {
+  const { userId, targetUserId } = req.body;
+  if (!userId || !targetUserId) {
+    return res.status(400).json({ error: 'Missing userId or targetUserId' });
+  }
+  const current = getPrivacySettings(userId);
+  if (!current.blockedUsers) {
+    current.blockedUsers = [];
+  }
+  const index = current.blockedUsers.indexOf(targetUserId);
+  let isBlocked = false;
+  if (index > -1) {
+    current.blockedUsers.splice(index, 1);
+  } else {
+    current.blockedUsers.push(targetUserId);
+    isBlocked = true;
+  }
+  privacySettingsMap.set(userId, current);
+  res.json({ success: true, blockedUsers: current.blockedUsers, isBlocked });
+});
+
 
 app.get('/api/architecture', (req, res) => {
   res.json({
@@ -856,6 +986,19 @@ wss.on('connection', (ws: WebSocket) => {
               offlineQueue.set(processedMessage.receiverId, []);
             }
             offlineQueue.get(processedMessage.receiverId)!.push(processedMessage);
+
+            // Dispatch encrypted Web Push notification asynchronously
+            sendPushNotification(
+              processedMessage.receiverId,
+              processedMessage.senderName || 'New Message',
+              processedMessage.content || 'Sent a media attachment',
+              {
+                type: 'message',
+                chatId: processedMessage.conversationId,
+                senderId: processedMessage.senderId,
+                messageId: processedMessage.id,
+              }
+            ).catch((err) => console.error('[WebPush] Direct message notify error:', err));
           }
           break;
         }
@@ -897,6 +1040,32 @@ wss.on('connection', (ws: WebSocket) => {
             },
             processedMessage.senderId
           );
+
+          // Find group and send Web Push notifications to offline participants
+          const group = groupsMap.get(processedMessage.groupId);
+          if (group) {
+            group.participants.forEach((pId) => {
+              if (pId === processedMessage.senderId) return;
+              const sockets = clientsMap.get(pId);
+              const isOnline = sockets && sockets.size > 0;
+              if (!isOnline) {
+                const groupName = group.name || 'Group';
+                const senderName = processedMessage.senderName || 'Member';
+                sendPushNotification(
+                  pId,
+                  groupName,
+                  `${senderName}: ${processedMessage.content || 'Sent a media attachment'}`,
+                  {
+                    type: 'group_message',
+                    chatId: convId,
+                    groupId: processedMessage.groupId,
+                    senderId: processedMessage.senderId,
+                    messageId: processedMessage.id,
+                  }
+                ).catch((err) => console.error('[WebPush] Group message notify error:', err));
+              }
+            });
+          }
           break;
         }
 
@@ -1143,6 +1312,105 @@ wss.on('connection', (ws: WebSocket) => {
             // Also echo back to sender socket so UI updates immediately
             ws.send(sendPayload);
           });
+          break;
+        }
+
+        // 9. WebRTC Signaling Cases
+        case 'call:initiate': {
+          const { callId, callerId, callerName, callerAvatar, receiverId, callType } = data;
+          if (!receiverId) break;
+          const receiverSockets = clientsMap.get(receiverId);
+          if (receiverSockets) {
+            receiverSockets.forEach((s) => {
+              if (s.readyState === WebSocket.OPEN) {
+                s.send(JSON.stringify({
+                  type: 'call:incoming',
+                  callId,
+                  callerId,
+                  callerName,
+                  callerAvatar,
+                  receiverId,
+                  callType,
+                }));
+              }
+            });
+          }
+          break;
+        }
+
+        case 'call:accept': {
+          const { callId, callerId, receiverId } = data;
+          if (!callerId) break;
+          const callerSockets = clientsMap.get(callerId);
+          if (callerSockets) {
+            callerSockets.forEach((s) => {
+              if (s.readyState === WebSocket.OPEN) {
+                s.send(JSON.stringify({
+                  type: 'call:accepted',
+                  callId,
+                  receiverId,
+                }));
+              }
+            });
+          }
+          break;
+        }
+
+        case 'call:decline': {
+          const { callId, callerId, receiverId, reason } = data;
+          if (!callerId) break;
+          const callerSockets = clientsMap.get(callerId);
+          if (callerSockets) {
+            callerSockets.forEach((s) => {
+              if (s.readyState === WebSocket.OPEN) {
+                s.send(JSON.stringify({
+                  type: 'call:declined',
+                  callId,
+                  receiverId,
+                  reason,
+                }));
+              }
+            });
+          }
+          break;
+        }
+
+        case 'call:end': {
+          const { callId, senderId, receiverId } = data;
+          const targetId = senderId === authenticatedUserId ? receiverId : senderId;
+          if (!targetId) break;
+          const sockets = clientsMap.get(targetId);
+          if (sockets) {
+            sockets.forEach((s) => {
+              if (s.readyState === WebSocket.OPEN) {
+                s.send(JSON.stringify({
+                  type: 'call:ended',
+                  callId,
+                  senderId,
+                }));
+              }
+            });
+          }
+          break;
+        }
+
+        case 'call:signal': {
+          const { callId, senderId, receiverId, signal } = data;
+          const targetId = receiverId;
+          if (!targetId) break;
+          const sockets = clientsMap.get(targetId);
+          if (sockets) {
+            sockets.forEach((s) => {
+              if (s.readyState === WebSocket.OPEN) {
+                s.send(JSON.stringify({
+                  type: 'call:signal',
+                  callId,
+                  senderId,
+                  signal,
+                }));
+              }
+            });
+          }
           break;
         }
 

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { motion } from 'motion/react';
 import { Search, X, MessageSquare, Image as ImageIcon, Volume2, FileText, Users, Plus, Shield, MessageCircle } from 'lucide-react';
 import { ChatSummary, MessageSearchResult } from '../types';
 import { ListItemEnter } from './animations/Animations';
@@ -28,6 +29,31 @@ export const ChatList: React.FC<ChatListProps> = ({
   const [searchTab, setSearchTab] = useState<'chats' | 'messages'>('chats');
   const [remoteMessageResults, setRemoteMessageResults] = useState<MessageSearchResult[]>([]);
   const [isSearchingMessages, setIsSearchingMessages] = useState(false);
+  const [verifiedPeers, setVerifiedPeers] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const checkVerified = () => {
+      try {
+        const stored = localStorage.getItem('cove_verified_peers');
+        if (stored) {
+          setVerifiedPeers(JSON.parse(stored));
+        } else {
+          setVerifiedPeers({});
+        }
+      } catch (e) {
+        console.error('Error reading verified peers:', e);
+      }
+    };
+    checkVerified();
+    
+    window.addEventListener('focus', checkVerified);
+    // Listen for custom event to update in real-time
+    window.addEventListener('cove_security_verified_update', checkVerified);
+    return () => {
+      window.removeEventListener('focus', checkVerified);
+      window.removeEventListener('cove_security_verified_update', checkVerified);
+    };
+  }, []);
 
   useEffect(() => {
     if (!searchQuery || searchQuery.trim().length < 2) {
@@ -338,8 +364,11 @@ export const ChatList: React.FC<ChatListProps> = ({
                   <div className="overflow-hidden flex-1">
                     <div className="flex items-center justify-between gap-1">
                       <div className="flex items-center gap-1.5 overflow-hidden">
-                        <span className="font-bold text-xs truncate text-slate-900">
-                          {displayName}
+                        <span className="font-bold text-xs truncate text-slate-900 flex items-center gap-1">
+                          <span>{displayName}</span>
+                          {!isGroup && verifiedPeers[displayName] && (
+                            <Shield className="w-3.5 h-3.5 text-emerald-500 fill-emerald-100 shrink-0" title="Security Code Verified" />
+                          )}
                         </span>
                         {isGroup && (
                           <span className="px-1.5 py-0.2 bg-sky-100 text-sky-700 text-[9px] font-extrabold rounded-md shrink-0">
@@ -376,11 +405,17 @@ export const ChatList: React.FC<ChatListProps> = ({
                         )}
                       </div>
 
-                      {/* Unread count badge */}
+                      {/* Unread count badge with spring bounce animation */}
                       {chat.unread_count > 0 && (
-                        <span className="w-4 h-4 bg-emerald-500 text-white rounded-full text-[9px] font-bold flex items-center justify-center shrink-0 shadow-2xs">
+                        <motion.span
+                          key={chat.unread_count}
+                          initial={{ scale: 0.5, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          transition={{ type: 'spring', stiffness: 500, damping: 15 }}
+                          className="min-w-4 h-4 px-1 bg-emerald-500 text-white rounded-full text-[9px] font-extrabold flex items-center justify-center shrink-0 shadow-2xs font-mono"
+                        >
                           {chat.unread_count}
-                        </span>
+                        </motion.span>
                       )}
                     </div>
                   </div>

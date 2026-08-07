@@ -1,6 +1,6 @@
 {
   "name": "Cove",
   "description": "Clean, minimal, calming authentication app built with Supabase and a teal/blue palette.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["camera", "microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

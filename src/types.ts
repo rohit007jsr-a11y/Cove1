@@ -191,5 +191,46 @@ export interface UserStatusGroup {
   statuses: StatusItem[];
 }
 
+export interface UserPushSubscription {
+  endpoint: string;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+}
+
+export interface UserNotificationSettings {
+  userId: string;
+  globalMute: boolean;
+  showPreviews: boolean;
+  soundEnabled: boolean;
+  statusUpdatesEnabled: boolean;
+  mutedChats: string[]; // conversation_id or group_id
+}
+
+export type PrivacyValue = 'everyone' | 'contacts' | 'nobody';
+
+export interface UserPrivacySettings {
+  userId: string;
+  profilePhotoVisibility: PrivacyValue;
+  aboutVisibility: PrivacyValue;
+  lastSeenVisibility: PrivacyValue;
+  statusVisibility: PrivacyValue;
+  blockedUsers: string[]; // list of blocked user_ids
+}
+
+export interface SyncedContact {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  mappedUserId: string | null;
+  isRegistered: boolean;
+  avatarUrl: string | null;
+  about: string | null;
+  source: 'manual' | 'csv_import';
+}
+
+
 
 

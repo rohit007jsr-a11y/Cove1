@@ -31,6 +31,7 @@ class RealtimeChatClient {
     this.eventListeners.set('group:updated', new Set());
     this.eventListeners.set('status:updated_all', new Set());
     this.eventListeners.set('reaction_updated', new Set());
+    this.eventListeners.set('call_event', new Set());
   }
 
   /**
@@ -164,6 +165,14 @@ class RealtimeChatClient {
 
       case 'message:reaction_updated':
         this.emit('reaction_updated', data);
+        break;
+
+      case 'call:incoming':
+      case 'call:accepted':
+      case 'call:declined':
+      case 'call:ended':
+      case 'call:signal':
+        this.emit('call_event', data);
         break;
 
       default:
@@ -354,9 +363,24 @@ class RealtimeChatClient {
   }
 
   /**
+   * Send WebRTC Call Signaling payload over WebSocket
+   */
+  public sendCallSignal(payload: {
+    type: 'call:initiate' | 'call:accept' | 'call:decline' | 'call:end' | 'call:signal';
+    callId: string;
+    [key: string]: any;
+  }) {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify(payload));
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Event Listener Subscriptions
    */
-  public on(event: 'connect' | 'disconnect' | 'message' | 'status' | 'read_receipt' | 'typing' | 'presence' | 'sync_complete' | 'group:created' | 'group:updated' | 'status:updated_all' | 'reaction_updated', callback: EventCallback) {
+  public on(event: 'connect' | 'disconnect' | 'message' | 'status' | 'read_receipt' | 'typing' | 'presence' | 'sync_complete' | 'group:created' | 'group:updated' | 'status:updated_all' | 'reaction_updated' | 'call_event', callback: EventCallback) {
     if (!this.eventListeners.has(event)) {
       this.eventListeners.set(event, new Set());
     }

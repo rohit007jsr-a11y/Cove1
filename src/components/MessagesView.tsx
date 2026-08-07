@@ -18,7 +18,14 @@ import {
   Search,
   X,
   Info,
-  CircleDot
+  CircleDot,
+  Bell,
+  BellOff,
+  Lock,
+  Shield,
+  Phone,
+  Video,
+  Palette,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { UserProfile, ContactRequest, Message, Profile, ChatSummary, ReplyPreview, Group, UserStatusGroup, Reaction } from '../types';
@@ -27,6 +34,7 @@ import { ContactsView } from './ContactsView';
 import { ProfileView } from './ProfileView';
 import { AccountSettingsModal } from './AccountSettingsModal';
 import { ArchitectureModal } from './ArchitectureModal';
+import { DesignSystemModal } from './DesignSystemModal';
 import { ChatList } from './ChatList';
 import { StatusList } from './StatusList';
 import { MessageBubble } from './MessageBubble';
@@ -35,7 +43,9 @@ import { CreateGroupModal } from './CreateGroupModal';
 import { GroupInfoModal } from './GroupInfoModal';
 import { MediaViewerModal } from './MediaViewerModal';
 import { ForwardModal } from './ForwardModal';
+import { CallOverlay, CallSession } from './CallOverlay';
 import { realtimeChat } from '../lib/websocket';
+import { getNotificationSettings, toggleChatMute } from '../lib/notifications';
 import {
   idbSaveMessage,
   idbSaveMessagesBulk,
@@ -82,6 +92,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const [rightPaneView, setRightPaneView] = useState<'chat' | 'profile'>('chat');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isArchitectureOpen, setIsArchitectureOpen] = useState(false);
+  const [isDesignSystemOpen, setIsDesignSystemOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [replyingTo, setReplyingTo] = useState<ReplyPreview | null>(null);
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
@@ -91,12 +102,77 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const [selectedMediaIndex, setSelectedMediaIndex] = useState(0);
   const [forwardModalOpen, setForwardModalOpen] = useState(false);
   const [messageToForward, setMessageToForward] = useState<Message | null>(null);
+  const [verifiedPeers, setVerifiedPeers] = useState<Record<string, boolean>>({});
+  const [activeCall, setActiveCall] = useState<CallSession | null>(null);
+
+  useEffect(() => {
+    const checkVerified = () => {
+      try {
+        const stored = localStorage.getItem('cove_verified_peers');
+        if (stored) {
+          setVerifiedPeers(JSON.parse(stored));
+        } else {
+          setVerifiedPeers({});
+        }
+      } catch (e) {
+        console.error('Error reading verified peers:', e);
+      }
+    };
+    checkVerified();
+    
+    window.addEventListener('focus', checkVerified);
+    window.addEventListener('cove_security_verified_update', checkVerified);
+    return () => {
+      window.removeEventListener('focus', checkVerified);
+      window.removeEventListener('cove_security_verified_update', checkVerified);
+    };
+  }, []);
 
   // In-chat search states
   const [showInChatSearch, setShowInChatSearch] = useState(false);
   const [inChatSearchQuery, setInChatSearchQuery] = useState('');
   const [activeMatchIndex, setActiveMatchIndex] = useState(-1);
   const [pendingJumpMessageId, setPendingJumpMessageId] = useState<string | null>(null);
+
+  // Update App Badge count for PWA and desktop install icons based on total unread count
+  useEffect(() => {
+    const totalUnread = chatSummaries.reduce((acc, chat) => acc + (chat.unread_count || 0), 0);
+    if (typeof navigator !== 'undefined' && 'setAppBadge' in navigator) {
+      if (totalUnread > 0) {
+        navigator.setAppBadge(totalUnread).catch((err) => console.log('[Badge] Failed to set app icon badge:', err));
+      } else {
+        navigator.clearAppBadge().catch((err) => console.log('[Badge] Failed to clear app icon badge:', err));
+      }
+    }
+  }, [chatSummaries]);
+
+  // Per-chat mute settings
+  const [isChatMuted, setIsChatMuted] = useState(false);
+
+  useEffect(() => {
+    if (user?.id && activeConversationId) {
+      getNotificationSettings(user.id).then((settings) => {
+        if (settings) {
+          setIsChatMuted(settings.mutedChats.includes(activeConversationId));
+        }
+      });
+    }
+  }, [user?.id, activeConversationId]);
+
+  const handleToggleMuteActiveChat = async () => {
+    if (!user?.id || !activeConversationId) return;
+    const res = await toggleChatMute(user.id, activeConversationId);
+    if (res) {
+      setIsChatMuted(res.isMuted);
+      showToast(
+        'success',
+        res.isMuted ? 'Chat Muted' : 'Chat Unmuted',
+        res.isMuted
+          ? 'You will not receive background push notification alerts for this conversation.'
+          : 'Background push notifications for this conversation are restored.'
+      );
+    }
+  };
 
   // Auto-reset search query when switching chats
   useEffect(() => {
@@ -240,6 +316,27 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           return cs;
         })
       );
+
+      // In-app alert dispatching with sound & toast triggers based on user's notification preferences
+      getNotificationSettings(user.id).then((settings) => {
+        if (!settings) return;
+        if (settings.globalMute) return;
+        if (settings.mutedChats.includes(formattedMsg.conversation_id)) return;
+
+        // Play chime SFX if sound is enabled and recipient is me
+        if (settings.soundEnabled && formattedMsg.sender_id !== user.id) {
+          const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-600.wav');
+          audio.volume = 0.35;
+          audio.play().catch(() => {});
+        }
+
+        // Show toast banner if sender is someone else AND we are not currently viewing this conversation
+        if (formattedMsg.sender_id !== user.id && formattedMsg.conversation_id !== activeConversationId) {
+          const title = settings.showPreviews ? (formattedMsg.sender_name || 'New Message') : 'New Message';
+          const body = settings.showPreviews ? (formattedMsg.content || 'Sent an attachment') : 'You received a new message';
+          showToast('info', title, body);
+        }
+      });
     });
 
     // Status update handler
@@ -349,6 +446,16 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     // Status/Stories real-time update handler
     const unsubscribeStatusUpdates = realtimeChat.on('status:updated_all', () => {
       fetchStatuses();
+      getNotificationSettings(user.id).then((settings) => {
+        if (settings && !settings.globalMute && settings.statusUpdatesEnabled) {
+          showToast('info', 'Status Update', 'A contact has posted a new status update!');
+          if (settings.soundEnabled) {
+            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-600.wav');
+            audio.volume = 0.25;
+            audio.play().catch(() => {});
+          }
+        }
+      });
     });
 
     // Message reaction updated handler
@@ -357,6 +464,23 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       setMessages((prev) =>
         prev.map((msg) => (msg.id === messageId ? { ...msg, reactions } : msg))
       );
+    });
+
+    // WebRTC calling signal handler
+    const unsubscribeCallEvent = realtimeChat.on('call_event', (data: any) => {
+      if (data.type === 'call:incoming' && data.receiverId === user.id) {
+        setActiveCall({
+          callId: data.callId,
+          callerId: data.callerId,
+          callerName: data.callerName,
+          callerAvatar: data.callerAvatar,
+          receiverId: data.receiverId,
+          receiverName: user.user_metadata?.full_name || user.email || 'You',
+          receiverAvatar: user.user_metadata?.avatar_url,
+          type: data.callType,
+          direction: 'incoming',
+        });
+      }
     });
 
     return () => {
@@ -368,6 +492,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       unsubscribeGroupUpdated();
       unsubscribeStatusUpdates();
       unsubscribeReaction();
+      unsubscribeCallEvent();
     };
   }, [activeConversationId, user.id]);
 
@@ -775,6 +900,42 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   };
 
   // Delete message locally
+  const handleStartCall = (type: 'voice' | 'video') => {
+    if (!selectedContact) return;
+    const receiverId =
+      selectedContact.requester_id === user.id
+        ? (selectedContact.addressee_id || selectedContact.profile?.id)
+        : (selectedContact.requester_id || selectedContact.profile?.id);
+
+    if (!receiverId) return;
+
+    const callId = `call_${Date.now()}`;
+    const newCall: CallSession = {
+      callId,
+      callerId: user.id,
+      callerName: user.user_metadata?.full_name || user.email || 'You',
+      callerAvatar: user.user_metadata?.avatar_url,
+      receiverId,
+      receiverName: selectedContact.profile?.display_name || selectedContact.profile?.email || 'Cove Member',
+      receiverAvatar: selectedContact.profile?.avatar_url,
+      type,
+      direction: 'outgoing',
+    };
+
+    setActiveCall(newCall);
+
+    // Notify receiver via WebSocket signaling relay
+    realtimeChat.sendCallSignal({
+      type: 'call:initiate',
+      callId,
+      callerId: user.id,
+      callerName: user.user_metadata?.full_name || user.email || 'You',
+      callerAvatar: user.user_metadata?.avatar_url,
+      receiverId,
+      callType: type,
+    });
+  };
+
   const handleDeleteMessage = (messageId: string) => {
     setMessages((prev) => prev.filter((m) => m.id !== messageId));
     showToast('info', 'Message Deleted', 'Removed from conversation view.');
@@ -1120,6 +1281,31 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     return name.slice(0, 2).toUpperCase();
   };
 
+  const handleStartChatWithProfile = async (profile: Profile) => {
+    let existingContact = contacts.find(
+      (c) => c.profile?.id === profile.id || c.requester_id === profile.id || c.addressee_id === profile.id
+    );
+
+    if (!existingContact) {
+      const mockContact: ContactRequest = {
+        id: `contact-mapped-${profile.id}`,
+        requester_id: user.id,
+        addressee_id: profile.id,
+        status: 'accepted',
+        created_at: new Date().toISOString(),
+        profile: profile,
+      };
+      
+      setContacts((prev) => [mockContact, ...prev]);
+      existingContact = mockContact;
+    }
+
+    setSelectedGroup(null);
+    setSelectedContact(existingContact);
+    setSidebarView('chats');
+    setIsSettingsOpen(false);
+  };
+
   return (
     <div className="w-full h-screen min-h-[100dvh] bg-white flex flex-col overflow-hidden select-none font-sans">
       {/* Network Status Banner */}
@@ -1169,6 +1355,13 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
             {/* Actions */}
             <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={() => setIsDesignSystemOpen(true)}
+                className="p-2 rounded-full hover:bg-slate-100 text-slate-600 hover:text-sky-600 transition-colors relative"
+                title="Cove Design System Playground"
+              >
+                <Palette className="w-4 h-4 text-sky-500" />
+              </button>
               <button
                 onClick={() => setIsArchitectureOpen(true)}
                 className="p-2 rounded-full hover:bg-slate-100 text-slate-600 hover:text-sky-600 transition-colors relative"
@@ -1622,8 +1815,13 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                       {getContactInitials(selectedContact)}
                     </div>
                     <div className="overflow-hidden">
-                      <h3 className="font-bold text-sm text-slate-900 group-hover:text-sky-600 truncate leading-tight">
-                        {getContactName(selectedContact)}
+                      <h3 className="font-bold text-sm text-slate-900 group-hover:text-sky-600 truncate leading-tight flex items-center gap-1.5">
+                        <span>{getContactName(selectedContact)}</span>
+                        {verifiedPeers[getContactName(selectedContact)] ? (
+                          <Shield className="w-3.5 h-3.5 text-emerald-500 fill-emerald-100" title="Security Code Verified" />
+                        ) : (
+                          <Lock className="w-3 text-slate-400" title="End-to-End Encrypted" />
+                        )}
                       </h3>
                       <p className="text-[11px] text-slate-500 truncate mt-0.5 font-mono">
                         {isRecipientTyping ? (
@@ -1637,6 +1835,20 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
                   <div className="flex items-center gap-2">
                     <button
+                      onClick={() => handleStartCall('voice')}
+                      className="p-1.5 rounded-xl hover:bg-emerald-50 text-emerald-600 hover:text-emerald-700 transition-all border border-transparent hover:border-emerald-200/50"
+                      title="Start Voice Call"
+                    >
+                      <Phone className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleStartCall('video')}
+                      className="p-1.5 rounded-xl hover:bg-sky-50 text-sky-600 hover:text-sky-700 transition-all border border-transparent hover:border-sky-200/50"
+                      title="Start Video Call"
+                    >
+                      <Video className="w-4 h-4" />
+                    </button>
+                    <button
                       onClick={() => setShowInChatSearch(!showInChatSearch)}
                       className={`p-1.5 rounded-xl transition-all ${
                         showInChatSearch
@@ -1646,6 +1858,17 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                       title="Search keywords in this chat"
                     >
                       <Search className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={handleToggleMuteActiveChat}
+                      className={`p-1.5 rounded-xl transition-all ${
+                        isChatMuted
+                          ? 'bg-rose-50 text-rose-600 border border-rose-200/60 shadow-3xs'
+                          : 'hover:bg-slate-200 text-slate-600'
+                      }`}
+                      title={isChatMuted ? 'Unmute chat' : 'Mute chat'}
+                    >
+                      {isChatMuted ? <BellOff className="w-4 h-4" /> : <Bell className="w-4 h-4" />}
                     </button>
                     <button
                       onClick={() => setIsArchitectureOpen(true)}
@@ -1767,6 +1990,22 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                     </div>
                   ) : (
                     <div className="space-y-3 flex-1">
+                      {/* E2EE Active Indicator Notice banner */}
+                      <div 
+                        onClick={() => {
+                          setIsArchitectureOpen(true);
+                          // We'll set a tiny timer or global hook if needed to focus the security tab,
+                          // but simply opening the architecture modal gives the user full access.
+                        }}
+                        className="mx-auto mb-4 max-w-sm p-3 bg-slate-900/5 hover:bg-slate-900/10 border border-slate-200/80 rounded-2xl text-[11px] text-slate-600 flex items-start gap-2.5 cursor-pointer select-none transition-all shadow-3xs"
+                        title="View End-to-End Encryption Specifications"
+                      >
+                        <Lock className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                        <div className="flex-1 leading-normal">
+                          <span className="font-bold text-slate-800">Messages are end-to-end encrypted.</span> No one outside of this chat, not even Cove, can read or listen to them. Tap to verify security codes.
+                        </div>
+                      </div>
+
                       {messages.map((msg) => {
                         const isMe = msg.sender_id === user.id;
                         const isActiveMatch =
@@ -1875,6 +2114,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         user={user}
         onSignOut={onSignOut}
         showToast={showToast}
+        onOpenChatWithProfile={handleStartChatWithProfile}
       />
 
       {/* Architecture System Modal */}
@@ -1923,6 +2163,21 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         groups={groups}
         currentUserId={user.id}
         onForward={handleConfirmForward}
+      />
+
+      {/* Realtime Call Overlay */}
+      <CallOverlay
+        currentUser={user}
+        activeCall={activeCall}
+        onEndCall={() => setActiveCall(null)}
+        showToast={showToast}
+      />
+
+      {/* Global Interactive Design System & Animation Showcase */}
+      <DesignSystemModal
+        isOpen={isDesignSystemOpen}
+        onClose={() => setIsDesignSystemOpen(false)}
+        showToast={showToast}
       />
     </div>
   );
