@@ -12,6 +12,7 @@ import { AuthView, UserProfile, ToastMessage } from './types';
 import { CoveLogo } from './components/CoveLogo';
 import { Sparkles, ShieldCheck, Mail, ArrowRight, RefreshCw } from 'lucide-react';
 import { generateAutoUsername } from './lib/username';
+import { cacheUserProfile, cacheSessionMetadata, clearCoveCache } from './lib/cache';
 
 export default function App() {
   const [currentView, setCurrentView] = useState<AuthView>('login');
@@ -46,14 +47,18 @@ export default function App() {
               username: autoUsername,
             };
 
-            setUser({
+            const userObj: UserProfile = {
               id: session.user.id,
               email: session.user.email,
               created_at: session.user.created_at,
               last_sign_in_at: session.user.last_sign_in_at,
               email_confirmed_at: session.user.email_confirmed_at,
               user_metadata: userMeta,
-            });
+            };
+
+            setUser(userObj);
+            cacheUserProfile(userObj);
+            cacheSessionMetadata(userObj, session.access_token);
 
             if (session.user.id && session.user.email) {
               const meta = (session.user.user_metadata || {}) as Record<string, any>;
@@ -98,14 +103,18 @@ export default function App() {
           username: autoUsername,
         };
 
-        setUser({
+        const userObj: UserProfile = {
           id: session.user.id,
           email: session.user.email,
           created_at: session.user.created_at,
           last_sign_in_at: session.user.last_sign_in_at,
           email_confirmed_at: session.user.email_confirmed_at,
           user_metadata: userMeta,
-        });
+        };
+
+        setUser(userObj);
+        cacheUserProfile(userObj);
+        cacheSessionMetadata(userObj, session.access_token);
 
         if (session.user.email_confirmed_at) {
           setCurrentView('dashboard');
@@ -116,6 +125,7 @@ export default function App() {
       } else {
         setUser(null);
         if (event === 'SIGNED_OUT') {
+          clearCoveCache();
           setCurrentView('login');
         }
       }
@@ -130,6 +140,7 @@ export default function App() {
   const handleSignOut = async () => {
     try {
       await supabase.auth.signOut();
+      await clearCoveCache();
       setUser(null);
       setCurrentView('login');
       showToast('info', 'Signed Out', 'You have been signed out from Cove.');
