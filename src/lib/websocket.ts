@@ -5,6 +5,7 @@
 
 import { Message, MessageStatus } from '../types';
 import { idbSavePendingMessage, idbGetPendingSyncMessages, idbRemovePendingMessage } from './idb';
+import { supabase } from './supabase';
 
 type EventCallback = (data: any) => void;
 
@@ -57,7 +58,7 @@ class RealtimeChatClient {
     return this.socket?.readyState === WebSocket.OPEN;
   }
 
-  public connect(userId: string, userName?: string, avatarUrl?: string) {
+  public async connect(userId: string, userName?: string, avatarUrl?: string) {
     this.userId = userId;
     this.userName = userName || 'Cove User';
     this.avatarUrl = avatarUrl;
@@ -74,7 +75,9 @@ class RealtimeChatClient {
     try {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const host = window.location.host;
-      const wsUrl = `${protocol}//${host}/ws`;
+      const sessionData = await supabase.auth.getSession().catch(() => ({ data: { session: null } }));
+      const token = sessionData.data.session?.access_token || '';
+      const wsUrl = `${protocol}//${host}/ws${token ? `?token=${encodeURIComponent(token)}` : ''}`;
 
       if (this.connectTimeoutTimer) clearTimeout(this.connectTimeoutTimer);
       this.connectTimeoutTimer = setTimeout(() => {

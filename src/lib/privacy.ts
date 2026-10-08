@@ -1,9 +1,10 @@
 import { UserPrivacySettings } from '../types';
+import { apiFetch } from './api';
 
 // Fetch privacy settings for a user
 export async function getPrivacySettings(userId: string): Promise<UserPrivacySettings> {
   try {
-    const res = await fetch(`/api/privacy/settings?userId=${encodeURIComponent(userId)}`);
+    const res = await apiFetch(`/api/privacy/settings?userId=${encodeURIComponent(userId)}`);
     if (!res.ok) throw new Error('Failed to fetch privacy settings');
     const data = await res.json();
     return data.settings;
@@ -31,9 +32,8 @@ export async function updatePrivacySettings(
   settings: Partial<UserPrivacySettings>
 ): Promise<UserPrivacySettings | null> {
   try {
-    const res = await fetch('/api/privacy/settings', {
+    const res = await apiFetch('/api/privacy/settings', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, settings }),
     });
     if (!res.ok) throw new Error('Failed to save privacy settings');
@@ -67,9 +67,8 @@ export async function toggleBlockUser(
   targetUserId: string
 ): Promise<{ blockedUsers: string[]; isBlocked: boolean } | null> {
   try {
-    const res = await fetch('/api/privacy/block', {
+    const res = await apiFetch('/api/privacy/block', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, targetUserId }),
     });
     if (!res.ok) throw new Error('Failed to toggle user block status');
@@ -98,18 +97,17 @@ export async function toggleBlockUser(
       blockedUsers: [],
     };
     
-    const blockedList = current.blockedUsers || [];
-    const index = blockedList.indexOf(targetUserId);
+    const blockedUsers = current.blockedUsers || [];
+    const index = blockedUsers.indexOf(targetUserId);
     let isBlocked = false;
     if (index > -1) {
-      blockedList.splice(index, 1);
+      blockedUsers.splice(index, 1);
     } else {
-      blockedList.push(targetUserId);
+      blockedUsers.push(targetUserId);
       isBlocked = true;
     }
-    current.blockedUsers = blockedList;
+    current.blockedUsers = blockedUsers;
     localStorage.setItem(`cove_privacy_${userId}`, JSON.stringify(current));
-    
-    return { blockedUsers: blockedList, isBlocked };
+    return { blockedUsers, isBlocked };
   }
 }

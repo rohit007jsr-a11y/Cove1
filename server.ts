@@ -3,6 +3,7 @@ import http from 'http';
 import path from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
+import { createClient } from '@supabase/supabase-js';
 import {
   getPublicKey,
   addSubscription,
@@ -14,6 +15,28 @@ import {
   broadcastPushNotification,
   broadcastStatusUpdatePush,
 } from './server/notifications';
+
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://placeholder.supabase.co';
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'placeholder-key';
+const supabaseAdmin = createClient(supabaseUrl, supabaseAnonKey);
+
+async function requireAuth(req: any, res: any, next: any) {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Missing or invalid authorization token' });
+  }
+  const token = authHeader.split(' ')[1];
+  try {
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+    if (error || !user) {
+      return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+    }
+    req.user = { id: user.id, email: user.email };
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Unauthorized: Token verification failed' });
+  }
+}
 
 
 interface ChatClient {
@@ -83,6 +106,17 @@ const server = http.createServer(app);
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+app.use('/api', (req, res, next) => {
+  if (
+    req.path === '/health' ||
+    req.path === '/notifications/vapid-public-key' ||
+    req.path === '/architecture'
+  ) {
+    return next();
+  }
+  return requireAuth(req, res, next);
+});
 
 // In-memory real-time state for connected clients, offline message queue, status, and groups
 const clientsMap = new Map<string, Set<WebSocket>>();
@@ -1054,8 +1088,39 @@ app.get('/api/architecture', (req, res) => {
   });
 });
 
-// Real-time WebSocket Server setup
-const wss = new WebSocketServer({ server, path: '/ws' });
+// Real-time WebSocket Server setup with JWT token verification
+const wss = new WebSocketServer({ noServer: true });
+
+server.on('upgrade', async (request, socket, head) => {
+  const url = new URL(request.url || '', `http://${request.headers.host || 'localhost'}`);
+  if (url.pathname === '/ws') {
+    const token = url.searchParams.get('token');
+    if (!token) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    try {
+      const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+      if (error || !user) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      (request as any).verifiedUserId = user.id;
+    } catch {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request);
+    });
+  } else {
+    socket.destroy();
+  }
+});
 
 function broadcastUserPresence(userId: string, isOnline: boolean, userName?: string) {
   const userPrivacy = getPrivacySettings(userId);
@@ -1108,8 +1173,12 @@ function broadcastUserPresence(userId: string, isOnline: boolean, userName?: str
   });
 }
 
-wss.on('connection', (ws: WebSocket) => {
-  let authenticatedUserId: string | null = null;
+wss.on('connection', (ws: WebSocket, req: any) => {
+  const authenticatedUserId = req.verifiedUserId || null;
+  if (!authenticatedUserId) {
+    ws.close(4401, 'Unauthorized');
+    return;
+  }
 
   ws.on('message', (rawMessage: string) => {
     try {
@@ -1118,10 +1187,9 @@ wss.on('connection', (ws: WebSocket) => {
       switch (data.type) {
         // 1. Client authentication & session connection
         case 'auth': {
-          const { userId, userName, avatarUrl } = data;
+          const { userName, avatarUrl } = data;
+          const userId = authenticatedUserId;
           if (!userId) return;
-
-          authenticatedUserId = userId;
           if (!clientsMap.has(userId)) {
             clientsMap.set(userId, new Set());
           }

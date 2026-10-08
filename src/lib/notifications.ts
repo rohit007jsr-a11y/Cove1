@@ -1,4 +1,5 @@
 import { UserNotificationSettings, UserPushSubscription } from '../types';
+import { apiFetch } from './api';
 
 // Helper: Convert VAPID public key from base64 string to Uint8Array for pushManager subscription
 function urlBase64ToUint8Array(base64String: string) {
@@ -57,7 +58,7 @@ export async function subscribeUserToPush(userId: string): Promise<UserPushSubsc
     }
 
     // 1. Fetch VAPID public key from backend
-    const keyRes = await fetch('/api/notifications/vapid-public-key');
+    const keyRes = await apiFetch('/api/notifications/vapid-public-key');
     if (!keyRes.ok) {
       throw new Error('Failed to fetch VAPID public key from server');
     }
@@ -88,9 +89,8 @@ export async function subscribeUserToPush(userId: string): Promise<UserPushSubsc
     };
 
     // 4. Send subscription to server
-    const subscribeRes = await fetch('/api/notifications/subscribe', {
+    const subscribeRes = await apiFetch('/api/notifications/subscribe', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, subscription: userSub }),
     });
 
@@ -125,9 +125,8 @@ export async function unsubscribeUserFromPush(userId: string): Promise<boolean> 
     }
 
     // 1. Delete on server
-    const unsubscribeRes = await fetch('/api/notifications/unsubscribe', {
+    const unsubscribeRes = await apiFetch('/api/notifications/unsubscribe', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, endpoint: subscription.endpoint }),
     });
 
@@ -148,7 +147,7 @@ export async function unsubscribeUserFromPush(userId: string): Promise<boolean> 
 // Fetch notification settings
 export async function getNotificationSettings(userId: string): Promise<UserNotificationSettings | null> {
   try {
-    const res = await fetch(`/api/notifications/settings?userId=${encodeURIComponent(userId)}`);
+    const res = await apiFetch(`/api/notifications/settings?userId=${encodeURIComponent(userId)}`);
     if (!res.ok) throw new Error('Failed to fetch settings');
     const data = await res.json();
     return data.settings;
@@ -164,9 +163,8 @@ export async function updateNotificationSettings(
   settings: Partial<UserNotificationSettings>
 ): Promise<UserNotificationSettings | null> {
   try {
-    const res = await fetch('/api/notifications/settings', {
+    const res = await apiFetch('/api/notifications/settings', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, settings }),
     });
     if (!res.ok) throw new Error('Failed to save settings');
@@ -181,9 +179,8 @@ export async function updateNotificationSettings(
 // Toggle mute/unmute on a single chat
 export async function toggleChatMute(userId: string, chatId: string): Promise<{ mutedChats: string[]; isMuted: boolean } | null> {
   try {
-    const res = await fetch('/api/notifications/mute', {
+    const res = await apiFetch('/api/notifications/mute', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, chatId }),
     });
     if (!res.ok) throw new Error('Failed to toggle chat mute');
