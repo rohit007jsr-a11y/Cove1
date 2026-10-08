@@ -36,6 +36,7 @@ export const StatusList: React.FC<StatusListProps> = ({
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
   const [activeGroupIndex, setActiveGroupIndex] = useState(0);
+  const [activeOwnerId, setActiveOwnerId] = useState<string | null>(null);
   const [showViewedSection, setShowViewedSection] = useState(true);
 
   // Find own status group
@@ -49,6 +50,7 @@ export const StatusList: React.FC<StatusListProps> = ({
     if (!group || !Array.isArray(group.statuses) || group.statuses.length === 0) return;
     const idx = statusGroups.findIndex((g) => g.ownerId === group.ownerId);
     setActiveGroupIndex(idx >= 0 ? idx : 0);
+    setActiveOwnerId(group.ownerId);
     setIsViewerOpen(true);
   };
 
@@ -320,9 +322,13 @@ export const StatusList: React.FC<StatusListProps> = ({
 
       <StatusViewerModal
         isOpen={isViewerOpen}
-        onClose={() => setIsViewerOpen(false)}
+        onClose={() => {
+          setIsViewerOpen(false);
+          setActiveOwnerId(null);
+        }}
         statusGroups={statusGroups}
         initialGroupIndex={activeGroupIndex}
+        initialOwnerId={activeOwnerId || undefined}
         currentUserId={currentUserId}
         currentUserName={currentUserName}
         currentUserAvatar={currentUserAvatar}

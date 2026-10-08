@@ -23,7 +23,7 @@ interface ContactsViewProps {
   onSelectContact?: (contact: ContactRequest) => void;
 }
 
-const DEMO_PROFILES: Profile[] = [
+export const DEMO_PROFILES: Profile[] = [
   {
     id: '11111111-1111-4111-a111-111111111111',
     email: 'alex@cove.app',

@@ -30,7 +30,7 @@ import {
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { UserProfile, ContactRequest, Message, Profile, ChatSummary, ReplyPreview, Group, UserStatusGroup, Reaction } from '../types';
 import { CoveLogo } from './CoveLogo';
-import { ContactsView } from './ContactsView';
+import { ContactsView, DEMO_PROFILES } from './ContactsView';
 import { ProfileView } from './ProfileView';
 import { AccountSettingsModal } from './AccountSettingsModal';
 import { ArchitectureModal } from './ArchitectureModal';
@@ -660,132 +660,180 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       setChatSummaries(cachedSummaries);
     }
 
-    try {
-      const { data, error } = await supabase
-        .from('contacts')
-        .select('*')
-        .eq('status', 'accepted')
-        .or(`requester_id.eq.${user.id},addressee_id.eq.${user.id}`);
+    let mappedContacts: ContactRequest[] = [];
 
-      if (!error && data && Array.isArray(data)) {
-        const otherUserIds = Array.from(
-          new Set(
-            data.map((item: any) =>
-              item.requester_id === user.id ? item.addressee_id : item.requester_id
+    if (isSupabaseConfigured) {
+      try {
+        const { data, error } = await supabase
+          .from('contacts')
+          .select('*')
+          .eq('status', 'accepted')
+          .or(`requester_id.eq.${user.id},addressee_id.eq.${user.id}`);
+
+        if (!error && data && Array.isArray(data) && data.length > 0) {
+          const otherUserIds = Array.from(
+            new Set(
+              data.map((item: any) =>
+                item.requester_id === user.id ? item.addressee_id : item.requester_id
+              )
             )
-          )
-        ).filter(Boolean);
+          ).filter(Boolean);
 
-        let profilesMap = new Map<string, Profile>();
-        if (otherUserIds.length > 0) {
-          const { data: profs } = await supabase
-            .from('profiles')
-            .select('id, email, display_name, username, about, avatar_url, created_at')
-            .in('id', otherUserIds);
+          let profilesMap = new Map<string, Profile>();
+          if (otherUserIds.length > 0) {
+            const { data: profs } = await supabase
+              .from('profiles')
+              .select('id, email, display_name, username, about, avatar_url, created_at')
+              .in('id', otherUserIds);
 
-          if (profs && Array.isArray(profs)) {
-            profs.forEach((p: any) => {
-              profilesMap.set(p.id, p);
-            });
+            if (profs && Array.isArray(profs)) {
+              profs.forEach((p: any) => {
+                profilesMap.set(p.id, p);
+              });
+            }
           }
-        }
 
-        const mappedContacts: ContactRequest[] = data.map((item: any) => {
-          const otherId = item.requester_id === user.id ? item.addressee_id : item.requester_id;
-          const profile = profilesMap.get(otherId) || {
-            id: otherId,
-            email: 'user@cove.app',
-            display_name: 'Cove Member',
-          };
-
-          return {
-            id: item.id,
-            requester_id: item.requester_id,
-            addressee_id: item.addressee_id,
-            status: item.status,
-            created_at: item.created_at,
-            profile,
-          };
-        });
-
-        setContacts(mappedContacts);
-        cacheContactsList(user.id, mappedContacts);
-
-        // Build Summaries for Direct Contacts
-        const directSummaries: ChatSummary[] = await Promise.all(
-          mappedContacts.map(async (c) => {
-            const otherId = c.requester_id === user.id ? c.addressee_id : c.requester_id;
-            const convId = (await getOrCreateConversationId(user.id, otherId, c.profile)) || c.id;
-
-            // Get last message from IndexedDB or Supabase
-            const localMsgs = await idbGetMessagesByConversation(convId);
-            const lastMsg = localMsgs.length > 0 ? localMsgs[localMsgs.length - 1] : null;
-
-            const summaryObj: ChatSummary = {
-              contact_id: c.id,
-              conversation_id: convId,
-              profile: c.profile || { id: otherId, email: 'user@cove.app' },
-              last_message: lastMsg,
-              unread_count: 0,
-              is_online: Boolean(presenceMap[otherId]?.isOnline),
-              is_typing: false,
-              updated_at: lastMsg?.created_at || c.created_at,
+          mappedContacts = data.map((item: any) => {
+            const otherId = item.requester_id === user.id ? item.addressee_id : item.requester_id;
+            const profile = profilesMap.get(otherId) || {
+              id: otherId,
+              email: 'user@cove.app',
+              display_name: 'Cove Member',
             };
 
-            await idbSaveChatSummary(summaryObj);
-            return summaryObj;
-          })
-        );
+            return {
+              id: item.id,
+              requester_id: item.requester_id,
+              addressee_id: item.addressee_id,
+              status: item.status,
+              created_at: item.created_at,
+              profile,
+            };
+          });
+        }
+      } catch (err) {
+        console.warn('Notice querying Supabase contacts:', err);
+      }
+    }
 
-        // Fetch Groups from API
-        let groupSummaries: ChatSummary[] = [];
+    // Fallback: If no Supabase contacts returned or not configured, load from localStorage & demo profiles
+    if (mappedContacts.length === 0) {
+      const localStore = localStorage.getItem('cove_contact_requests_global');
+      if (localStore) {
         try {
-          const res = await fetch(`/api/groups?userId=${user.id}`);
-          if (res.ok) {
-            const fetchedGroups: Group[] = await res.json();
-            setGroups(fetchedGroups);
-            for (const g of fetchedGroups) {
-              await idbSaveGroup(g);
+          const parsed = JSON.parse(localStore);
+          parsed.forEach((req: any) => {
+            const rId = req.requester_id;
+            const aId = req.addressee_id || req.recipient_id;
+            if ((rId === user.id || aId === user.id) && req.status === 'accepted') {
+              const otherId = rId === user.id ? aId : rId;
+              const demo = DEMO_PROFILES.find((p) => p.id === otherId);
+              mappedContacts.push({
+                id: req.id,
+                requester_id: rId,
+                addressee_id: aId,
+                status: 'accepted',
+                created_at: req.created_at || new Date().toISOString(),
+                profile: req.profile || demo || {
+                  id: otherId,
+                  email: req.recipient_email || 'user@cove.app',
+                  display_name: req.recipient_name || 'Cove Member',
+                },
+              });
             }
+          });
+        } catch {}
+      }
 
-            groupSummaries = await Promise.all(
-              fetchedGroups.map(async (g) => {
-                const localMsgs = await idbGetMessagesByConversation(g.id);
-                const lastMsg = localMsgs.length > 0 ? localMsgs[localMsgs.length - 1] : null;
+      // Add default demo contacts if not already added
+      DEMO_PROFILES.forEach((demo) => {
+        if (!mappedContacts.some((c) => c.profile?.id === demo.id)) {
+          mappedContacts.push({
+            id: `req-${demo.id}`,
+            requester_id: user.id,
+            addressee_id: demo.id,
+            status: 'accepted',
+            created_at: demo.created_at,
+            profile: demo,
+          });
+        }
+      });
+    }
 
-                const gSummary: ChatSummary = {
-                  contact_id: g.id,
-                  conversation_id: g.id,
-                  profile: {
-                    id: g.id,
-                    email: 'group@cove.app',
-                    display_name: g.name,
-                    avatar_url: g.avatarUrl,
-                  },
-                  is_group: true,
-                  group: g,
-                  last_message: lastMsg,
-                  unread_count: 0,
-                  is_online: true,
-                  is_typing: false,
-                  updated_at: lastMsg?.created_at || g.createdAt,
-                };
-                await idbSaveChatSummary(gSummary);
-                return gSummary;
-              })
-            );
-          }
-        } catch (gErr) {
-          console.warn('Notice fetching groups:', gErr);
-          const localGroups = await idbGetGroups();
-          setGroups(localGroups);
+    setContacts(mappedContacts);
+    cacheContactsList(user.id, mappedContacts);
+
+    // Build Summaries for Direct Contacts
+    const directSummaries: ChatSummary[] = await Promise.all(
+      mappedContacts.map(async (c) => {
+        const otherId = c.requester_id === user.id ? c.addressee_id : c.requester_id;
+        const convId = (await getOrCreateConversationId(user.id, otherId, c.profile)) || c.id;
+
+        // Get last message from IndexedDB or local cache
+        const localMsgs = await idbGetMessagesByConversation(convId);
+        const lastMsg = localMsgs.length > 0 ? localMsgs[localMsgs.length - 1] : null;
+
+        const summaryObj: ChatSummary = {
+          contact_id: c.id,
+          conversation_id: convId,
+          profile: c.profile || { id: otherId, email: 'user@cove.app' },
+          last_message: lastMsg,
+          unread_count: 0,
+          is_online: Boolean(presenceMap[otherId]?.isOnline),
+          is_typing: false,
+          updated_at: lastMsg?.created_at || c.created_at,
+        };
+
+        await idbSaveChatSummary(summaryObj);
+        return summaryObj;
+      })
+    );
+
+    // Fetch Groups from API unconditionally
+    let groupSummaries: ChatSummary[] = [];
+    try {
+      const res = await fetch(`/api/groups?userId=${user.id}`);
+      if (res.ok) {
+        const fetchedGroups: Group[] = await res.json();
+        setGroups(fetchedGroups);
+        for (const g of fetchedGroups) {
+          await idbSaveGroup(g);
         }
 
-        setChatSummaries([...directSummaries, ...groupSummaries]);
+        groupSummaries = await Promise.all(
+          fetchedGroups.map(async (g) => {
+            const localMsgs = await idbGetMessagesByConversation(g.id);
+            const lastMsg = localMsgs.length > 0 ? localMsgs[localMsgs.length - 1] : null;
+
+            const gSummary: ChatSummary = {
+              contact_id: g.id,
+              conversation_id: g.id,
+              profile: {
+                id: g.id,
+                email: 'group@cove.app',
+                display_name: g.name,
+                avatar_url: g.avatarUrl,
+              },
+              is_group: true,
+              group: g,
+              last_message: lastMsg,
+              unread_count: 0,
+              is_online: true,
+              is_typing: false,
+              updated_at: lastMsg?.created_at || g.createdAt,
+            };
+            await idbSaveChatSummary(gSummary);
+            return gSummary;
+          })
+        );
       }
-    } catch (err) {
-      console.error('Error fetching contacts & summaries:', err);
+    } catch (gErr) {
+      console.warn('Notice fetching groups:', gErr);
+      const localGroups = await idbGetGroups();
+      setGroups(localGroups);
     }
+
+    setChatSummaries([...directSummaries, ...groupSummaries]);
   };
 
   useEffect(() => {
@@ -834,21 +882,69 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     let isMounted = true;
 
     const loadConversation = async () => {
-      setLoading(true);
-
       if (selectedGroup) {
         setActiveConversationId(selectedGroup.id);
         const localMsgs = await idbGetMessagesByConversation(selectedGroup.id);
-        if (isMounted) setMessages(localMsgs);
-        setLoading(false);
+        if (isMounted) {
+          setMessages(localMsgs || []);
+          setLoading(false);
+        }
+
+        // Fast sync from local server endpoint
+        try {
+          const res = await fetch(`/api/messages?conversationId=${selectedGroup.id}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.messages && Array.isArray(data.messages) && isMounted) {
+              setMessages((prev) => {
+                const map = new Map<string, Message>(prev.map((m) => [m.id, m]));
+                data.messages.forEach((srvMsg: any) => {
+                  map.set(srvMsg.id, {
+                    id: srvMsg.id,
+                    conversation_id: srvMsg.conversationId || selectedGroup.id,
+                    sender_id: srvMsg.senderId,
+                    sender_name: srvMsg.senderName,
+                    receiver_id: srvMsg.receiverId,
+                    content: srvMsg.content,
+                    type: srvMsg.type || 'text',
+                    media_url: srvMsg.mediaUrl,
+                    thumbnail_url: srvMsg.thumbnailUrl,
+                    mime_type: srvMsg.mimeType,
+                    file_size: srvMsg.fileSize,
+                    duration: srvMsg.duration,
+                    file_name: srvMsg.fileName,
+                    created_at: srvMsg.createdAt,
+                    status: srvMsg.status || 'delivered',
+                    reply_to: srvMsg.replyTo,
+                    is_group: true,
+                    group_id: selectedGroup.id,
+                    reactions: srvMsg.reactions || [],
+                  });
+                });
+                const merged = Array.from(map.values()).sort(
+                  (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                );
+                idbSaveMessagesBulk(merged).catch(() => {});
+                return merged;
+              });
+            }
+          }
+        } catch {}
+        if (isMounted) setLoading(false);
         return;
       }
 
       if (selectedContact) {
         const otherUserId =
-          selectedContact.requester_id === user.id
+          (selectedContact.requester_id === user.id
             ? (selectedContact.addressee_id || selectedContact.profile?.id)
-            : (selectedContact.requester_id || selectedContact.profile?.id);
+            : (selectedContact.requester_id || selectedContact.profile?.id)) ||
+          selectedContact.profile?.id ||
+          selectedContact.addressee_id ||
+          selectedContact.id;
+
+        const convId = getDeterministicConvId(user.id, otherUserId);
+        setActiveConversationId(convId);
 
         if (otherUserId) {
           realtimeChat.queryPresence([otherUserId]);
@@ -868,19 +964,57 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             .catch(() => {});
         }
 
-        const convId = await getOrCreateConversationId(user.id, otherUserId, selectedContact.profile);
-        if (!isMounted) return;
-
-        setActiveConversationId(convId);
-
-        if (convId) {
-          // Load instantly from IndexedDB first
-          const localMsgs = await idbGetMessagesByConversation(convId);
-          if (localMsgs && localMsgs.length > 0 && isMounted) {
+        // 1. Instant load from IndexedDB first
+        const localMsgs = await idbGetMessagesByConversation(convId);
+        if (isMounted) {
+          if (localMsgs && localMsgs.length > 0) {
             setMessages(localMsgs);
           }
+          setLoading(false); // Stop loading immediately so user sees message thread
+        }
 
-          // Fetch updates from Supabase
+        // 2. Fast server sync from /api/messages
+        try {
+          const srvRes = await fetch(`/api/messages?conversationId=${convId}`);
+          if (srvRes.ok) {
+            const srvData = await srvRes.json();
+            if (srvData.messages && Array.isArray(srvData.messages) && isMounted) {
+              setMessages((prev) => {
+                const map = new Map<string, Message>(prev.map((m) => [m.id, m]));
+                srvData.messages.forEach((srvMsg: any) => {
+                  map.set(srvMsg.id, {
+                    id: srvMsg.id,
+                    conversation_id: srvMsg.conversationId || convId,
+                    sender_id: srvMsg.senderId,
+                    sender_name: srvMsg.senderName,
+                    receiver_id: srvMsg.receiverId || otherUserId,
+                    content: srvMsg.content,
+                    type: srvMsg.type || 'text',
+                    media_url: srvMsg.mediaUrl,
+                    thumbnail_url: srvMsg.thumbnailUrl,
+                    mime_type: srvMsg.mimeType,
+                    file_size: srvMsg.fileSize,
+                    duration: srvMsg.duration,
+                    file_name: srvMsg.fileName,
+                    created_at: srvMsg.createdAt,
+                    status: srvMsg.status || 'delivered',
+                    reply_to: srvMsg.replyTo,
+                    is_group: false,
+                    reactions: srvMsg.reactions || [],
+                  });
+                });
+                const merged = Array.from(map.values()).sort(
+                  (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                );
+                idbSaveMessagesBulk(merged).catch(() => {});
+                return merged;
+              });
+            }
+          }
+        } catch {}
+
+        // 3. Only if Supabase is actually configured, sync in background non-blocking
+        if (isSupabaseConfigured) {
           try {
             const { data, error } = await supabase
               .from('messages')
@@ -888,27 +1022,31 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               .eq('conversation_id', convId)
               .order('created_at', { ascending: true });
 
-            if (!error && data && Array.isArray(data)) {
-              const formatted: Message[] = data.map((m) => ({
-                id: m.id,
-                conversation_id: m.conversation_id,
-                sender_id: m.sender_id,
-                receiver_id: otherUserId,
-                content: m.content,
-                type: m.type || 'text',
-                media_url: m.media_url,
-                created_at: m.created_at,
-                status: m.read_at ? 'read' : 'delivered',
-              }));
-
-              if (isMounted) {
-                setMessages(formatted);
-                await idbSaveMessagesBulk(formatted);
-                cacheConversationMessages(convId, formatted);
-              }
+            if (!error && data && Array.isArray(data) && isMounted) {
+              setMessages((prev) => {
+                const map = new Map<string, Message>(prev.map((m) => [m.id, m]));
+                data.forEach((m: any) => {
+                  map.set(m.id, {
+                    id: m.id,
+                    conversation_id: m.conversation_id,
+                    sender_id: m.sender_id,
+                    receiver_id: otherUserId,
+                    content: m.content,
+                    type: m.type || 'text',
+                    media_url: m.media_url,
+                    created_at: m.created_at,
+                    status: m.read_at ? 'read' : 'delivered',
+                  });
+                });
+                const merged = Array.from(map.values()).sort(
+                  (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                );
+                idbSaveMessagesBulk(merged).catch(() => {});
+                return merged;
+              });
             }
           } catch (err) {
-            console.error('Error fetching conversation messages:', err);
+            console.warn('Notice syncing Supabase messages:', err);
           }
         }
       }
@@ -1172,9 +1310,12 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     if (!selectedContact) return;
 
     const otherUserId =
-      selectedContact.requester_id === user.id
+      (selectedContact.requester_id === user.id
         ? (selectedContact.addressee_id || selectedContact.profile?.id)
-        : (selectedContact.requester_id || selectedContact.profile?.id);
+        : (selectedContact.requester_id || selectedContact.profile?.id)) ||
+      selectedContact.profile?.id ||
+      selectedContact.addressee_id ||
+      selectedContact.id;
 
     const convId = activeConversationId || getDeterministicConvId(user.id, otherUserId);
     if (!activeConversationId) {
@@ -1651,9 +1792,33 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                       setSelectedGroup(chat.group);
                       setSelectedContact(null);
                     } else {
-                      const found = contacts.find((c) => c.id === chat.contact_id);
+                      const found = contacts.find(
+                        (c) =>
+                          c.id === chat.contact_id ||
+                          c.profile?.id === chat.contact_id ||
+                          c.profile?.id === chat.profile?.id ||
+                          c.requester_id === chat.contact_id ||
+                          c.addressee_id === chat.contact_id ||
+                          (chat.profile && (c.requester_id === chat.profile.id || c.addressee_id === chat.profile.id))
+                      );
                       if (found) {
                         setSelectedContact(found);
+                        setSelectedGroup(null);
+                      } else {
+                        const targetId = chat.profile?.id || chat.contact_id;
+                        const synthContact: ContactRequest = {
+                          id: chat.contact_id || `req-${targetId}`,
+                          requester_id: user.id,
+                          addressee_id: targetId,
+                          status: 'accepted',
+                          created_at: chat.updated_at || new Date().toISOString(),
+                          profile: chat.profile || {
+                            id: targetId,
+                            email: 'user@cove.app',
+                            display_name: 'Contact',
+                          },
+                        };
+                        setSelectedContact(synthContact);
                         setSelectedGroup(null);
                       }
                     }
@@ -1901,7 +2066,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                 onScroll={handleScroll}
                 className="flex-1 overflow-y-auto p-4 md:p-6 space-y-3 bg-slate-50/40 flex flex-col relative"
               >
-                {loading ? (
+                {loading && messages.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full text-slate-500 text-xs gap-2">
                     <RefreshCw className="w-5 h-5 animate-spin text-sky-500" />
                     <span>Loading group message history...</span>
@@ -2204,7 +2369,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                   onScroll={handleScroll}
                   className="flex-1 overflow-y-auto p-4 md:p-6 space-y-3 bg-slate-50/40 flex flex-col relative"
                 >
-                  {loading ? (
+                  {loading && messages.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-slate-500 text-xs gap-2">
                       <RefreshCw className="w-5 h-5 animate-spin text-sky-500" />
                       <span>Loading conversation history...</span>

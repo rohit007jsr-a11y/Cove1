@@ -432,6 +432,16 @@ app.post('/api/upload', (req, res) => {
   }
 });
 
+// REST API for Message History Query
+app.get('/api/messages', (req, res) => {
+  const conversationId = req.query.conversationId as string;
+  if (!conversationId) {
+    return res.status(400).json({ error: 'Missing conversationId' });
+  }
+  const msgs = conversationMessages.get(conversationId) || [];
+  res.json({ success: true, messages: msgs });
+});
+
 // REST API for instant Message Sending (Fast HTTP fallback and direct sync)
 app.post('/api/messages', (req, res) => {
   try {
@@ -445,6 +455,12 @@ app.post('/api/messages', (req, res) => {
       status: 'sent',
       createdAt: message.createdAt || new Date().toISOString(),
     };
+
+    // Auto-infer receiverId if missing in 1:1 conversation
+    if (!processedMessage.receiverId && processedMessage.conversationId?.startsWith('conv_')) {
+      const parts = processedMessage.conversationId.replace('conv_', '').split('_');
+      processedMessage.receiverId = parts.find((p) => p !== processedMessage.senderId);
+    }
 
     const convId = processedMessage.conversationId || (processedMessage.isGroup ? processedMessage.groupId : 'default');
     if (!conversationMessages.has(convId)) {
@@ -1146,7 +1162,13 @@ wss.on('connection', (ws: WebSocket) => {
         // 2. Client sends a 1:1 message
         case 'message:send': {
           const { message } = data as { message: MessagePayload };
-          if (!message || !message.senderId || !message.receiverId) return;
+          if (!message || !message.senderId) return;
+
+          // Auto-infer receiverId if missing in 1:1 conversation
+          if (!message.receiverId && message.conversationId?.startsWith('conv_')) {
+            const parts = message.conversationId.replace('conv_', '').split('_');
+            message.receiverId = parts.find((p) => p !== message.senderId);
+          }
 
           // Mark message as 'sent' by server
           const processedMessage: MessagePayload = {
@@ -1156,7 +1178,7 @@ wss.on('connection', (ws: WebSocket) => {
           };
 
           // Store in in-memory conversation list
-          const convId = processedMessage.conversationId;
+          const convId = processedMessage.conversationId || (processedMessage.isGroup ? processedMessage.groupId : 'default');
           if (!conversationMessages.has(convId)) {
             conversationMessages.set(convId, []);
           }

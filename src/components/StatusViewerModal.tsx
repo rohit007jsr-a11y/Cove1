@@ -21,6 +21,7 @@ interface StatusViewerModalProps {
   onClose: () => void;
   statusGroups: UserStatusGroup[];
   initialGroupIndex?: number;
+  initialOwnerId?: string;
   currentUserId: string;
   currentUserName: string;
   currentUserAvatar?: string;
@@ -36,6 +37,7 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({
   onClose,
   statusGroups,
   initialGroupIndex = 0,
+  initialOwnerId,
   currentUserId,
   currentUserName,
   currentUserAvatar,
@@ -60,13 +62,20 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({
   );
 
   useEffect(() => {
-    setGroupIndex(Math.min(Math.max(0, initialGroupIndex), Math.max(0, validGroups.length - 1)));
+    let targetIdx = initialGroupIndex;
+    if (initialOwnerId) {
+      const foundIdx = validGroups.findIndex((g) => g.ownerId === initialOwnerId);
+      if (foundIdx >= 0) {
+        targetIdx = foundIdx;
+      }
+    }
+    setGroupIndex(Math.min(Math.max(0, targetIdx), Math.max(0, validGroups.length - 1)));
     setItemIndex(0);
     setProgress(0);
     setIsPaused(false);
     setShowViewersDrawer(false);
     setMediaError(false);
-  }, [initialGroupIndex, isOpen, validGroups.length]);
+  }, [initialGroupIndex, initialOwnerId, isOpen, validGroups.length]);
 
   const safeGroupIndex = Math.min(Math.max(0, groupIndex), Math.max(0, validGroups.length - 1));
   const activeGroup = validGroups[safeGroupIndex];
@@ -74,6 +83,11 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({
   const safeItemIndex = Math.min(Math.max(0, itemIndex), Math.max(0, statuses.length - 1));
   const activeStatus: StatusItem | undefined = statuses[safeItemIndex];
   const isOwn = activeGroup?.ownerId === currentUserId;
+
+  // Reset media error whenever active status changes
+  useEffect(() => {
+    setMediaError(false);
+  }, [activeStatus?.id, safeItemIndex, safeGroupIndex]);
 
   // Mark status as viewed when displayed
   useEffect(() => {
@@ -340,9 +354,26 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({
 
             {/* Fallback if image/video failed to load */}
             {mediaError && (
-              <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center text-slate-300">
-                <p className="text-sm font-semibold">Media unavailable</p>
-                <p className="text-xs text-slate-400 mt-1">This photo or video could not be loaded.</p>
+              <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-gradient-to-br from-slate-900 via-sky-950 to-indigo-950 text-white">
+                <div className="w-14 h-14 rounded-2xl bg-white/10 flex items-center justify-center mb-3 backdrop-blur-md border border-white/15">
+                  <Shield className="w-7 h-7 text-sky-400" />
+                </div>
+                <h4 className="text-base font-bold drop-shadow-md max-w-xs">
+                  {activeStatus.caption || `${activeGroup.ownerName}'s Update`}
+                </h4>
+                <p className="text-xs text-sky-200/80 mt-1.5 max-w-xs font-medium">
+                  {formatTimeAgo(activeStatus.createdAt)}
+                </p>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMediaError(false);
+                  }}
+                  className="mt-4 px-4 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-full text-xs font-semibold backdrop-blur-md transition-all border border-white/20 active:scale-95 cursor-pointer"
+                >
+                  Tap to retry
+                </button>
               </div>
             )}
 

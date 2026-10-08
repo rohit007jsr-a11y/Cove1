@@ -136,15 +136,17 @@ export const CreateStatusModal: React.FC<CreateStatusModalProps> = ({
         });
       } else {
         // Video file
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          setMediaData({
-            url: event.target?.result as string,
-            type: 'video',
-            name: file.name,
-          });
-        };
-        reader.readAsDataURL(file);
+        const videoDataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (event) => resolve(event.target?.result as string);
+          reader.onerror = () => reject(new Error('Failed to read video file'));
+          reader.readAsDataURL(file);
+        });
+        setMediaData({
+          url: videoDataUrl,
+          type: 'video',
+          name: file.name,
+        });
       }
     } catch (err: any) {
       console.error('[StatusUpload] Error processing media:', err);
