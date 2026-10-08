@@ -45,7 +45,40 @@ export function formatAuthError(err: any): string {
     return 'Supabase email limit reached. Please disable "Confirm email" in your Supabase Auth -> Providers -> Email settings or configure a custom SMTP server.';
   }
 
+  if (
+    message.toLowerCase().includes('unsupported provider') ||
+    message.toLowerCase().includes('provider is not enabled') ||
+    message.toLowerCase().includes('validation_failed')
+  ) {
+    return 'Google provider is not enabled in Supabase yet. Please enable Google under Authentication -> Providers -> Google in your Supabase Dashboard.';
+  }
+
   return message;
+}
+
+export function getSupabaseAuthCallbackUrl(): string {
+  if (!supabaseUrl || supabaseUrl.includes('placeholder')) return '';
+  return `${supabaseUrl.replace(/\/+$/, '')}/auth/v1/callback`;
+}
+
+/**
+ * Initiates fast Google OAuth login via Supabase.
+ * Uses prompt=select_account to quickly pick an account without repeated permissions prompt.
+ */
+export async function signInWithGoogle() {
+  const origin = window.location.origin;
+  const redirectUrl = `${origin}/`;
+
+  return await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: redirectUrl,
+      queryParams: {
+        access_type: 'offline',
+        prompt: 'select_account',
+      },
+    },
+  });
 }
 
 export function getSupabaseConfig() {

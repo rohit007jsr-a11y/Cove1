@@ -41,9 +41,15 @@ export default function App() {
 
         if (mounted) {
           if (session?.user) {
-            const autoUsername = session.user.user_metadata?.username || generateAutoUsername(session.user.email || session.user.user_metadata?.full_name);
+            const meta = (session.user.user_metadata || {}) as Record<string, any>;
+            const rawName = meta.full_name || meta.name || '';
+            const rawAvatar = meta.avatar_url || meta.picture || '';
+            const autoUsername = meta.username || generateAutoUsername(session.user.email || rawName);
+            
             const userMeta = {
-              ...(session.user.user_metadata || {}),
+              ...meta,
+              full_name: rawName || meta.display_name || (session.user.email ? session.user.email.split('@')[0] : 'Cove User'),
+              avatar_url: rawAvatar,
               username: autoUsername,
             };
 
@@ -60,26 +66,43 @@ export default function App() {
             cacheUserProfile(userObj);
             cacheSessionMetadata(userObj, session.access_token);
 
+            // Sync profile data to Supabase database in background
             if (session.user.id && session.user.email) {
-              const meta = (session.user.user_metadata || {}) as Record<string, any>;
               supabase.from('profiles').upsert([
                 {
                   id: session.user.id,
                   email: session.user.email,
-                  display_name: meta.full_name || session.user.email.split('@')[0] || 'Cove User',
+                  display_name: userMeta.full_name,
                   username: autoUsername,
+                  avatar_url: userMeta.avatar_url,
                   about: meta.about || 'Hey there! I am using Cove.',
                 }
-              ], { onConflict: 'id' }).then(({ error }) => {
-                if (error) console.log('Notice upserting profile on init:', error.message);
+              ], { onConflict: 'id' }).then(({ error: upsertErr }) => {
+                if (upsertErr) console.log('Notice upserting profile on init:', upsertErr.message);
               });
             }
 
-            if (session.user.email_confirmed_at) {
+            // Google OAuth users are pre-verified by Google
+            const isGoogleUser = Boolean(
+              session.user.app_metadata?.provider === 'google' ||
+              session.user.identities?.some((id: any) => id.provider === 'google')
+            );
+            const isEmailConfirmed = Boolean(session.user.email_confirmed_at || isGoogleUser);
+
+            if (isEmailConfirmed) {
               setCurrentView('dashboard');
+              if (sessionStorage.getItem('cove_oauth_in_progress') === 'google') {
+                sessionStorage.removeItem('cove_oauth_in_progress');
+                showToast('success', 'Signed in with Google', `Welcome back, ${userMeta.full_name}!`);
+              }
             } else {
               setPendingEmail(session.user.email || '');
               setCurrentView('verification_pending');
+            }
+
+            // Clean OAuth tokens and codes from browser address bar
+            if (typeof window !== 'undefined' && (window.location.hash.includes('access_token=') || window.location.search.includes('code='))) {
+              window.history.replaceState({}, document.title, window.location.pathname);
             }
           }
         }
@@ -97,9 +120,15 @@ export default function App() {
       console.log('Supabase Auth Event:', event, session?.user?.email);
 
       if (session?.user) {
-        const autoUsername = session.user.user_metadata?.username || generateAutoUsername(session.user.email || session.user.user_metadata?.full_name);
+        const meta = (session.user.user_metadata || {}) as Record<string, any>;
+        const rawName = meta.full_name || meta.name || '';
+        const rawAvatar = meta.avatar_url || meta.picture || '';
+        const autoUsername = meta.username || generateAutoUsername(session.user.email || rawName);
+
         const userMeta = {
-          ...(session.user.user_metadata || {}),
+          ...meta,
+          full_name: rawName || meta.display_name || (session.user.email ? session.user.email.split('@')[0] : 'Cove User'),
+          avatar_url: rawAvatar,
           username: autoUsername,
         };
 
@@ -116,11 +145,27 @@ export default function App() {
         cacheUserProfile(userObj);
         cacheSessionMetadata(userObj, session.access_token);
 
-        if (session.user.email_confirmed_at) {
+        // Google OAuth users are pre-verified by Google
+        const isGoogleUser = Boolean(
+          session.user.app_metadata?.provider === 'google' ||
+          session.user.identities?.some((id: any) => id.provider === 'google')
+        );
+        const isEmailConfirmed = Boolean(session.user.email_confirmed_at || isGoogleUser);
+
+        if (isEmailConfirmed) {
           setCurrentView('dashboard');
+          if (sessionStorage.getItem('cove_oauth_in_progress') === 'google') {
+            sessionStorage.removeItem('cove_oauth_in_progress');
+            showToast('success', 'Signed in with Google', `Welcome back, ${userMeta.full_name}!`);
+          }
         } else if (event === 'SIGNED_IN') {
           setPendingEmail(session.user.email || '');
           setCurrentView('verification_pending');
+        }
+
+        // Clean URL hash/search if OAuth tokens are present
+        if (typeof window !== 'undefined' && (window.location.hash.includes('access_token=') || window.location.search.includes('code='))) {
+          window.history.replaceState({}, document.title, window.location.pathname);
         }
       } else {
         setUser(null);
@@ -165,13 +210,14 @@ export default function App() {
   };
 
   if (initializing) {
+    const isGoogleAuth = typeof window !== 'undefined' && sessionStorage.getItem('cove_oauth_in_progress') === 'google';
     return (
       <CalmBackground>
         <div className="flex flex-col items-center justify-center space-y-4">
           <CoveLogo size="lg" />
           <div className="flex items-center gap-2 text-[#0EA5E9] text-sm font-medium">
             <RefreshCw className="w-4 h-4 animate-spin" />
-            <span>Connecting to Cove...</span>
+            <span>{isGoogleAuth ? 'Verifying Google account...' : 'Connecting to Cove...'}</span>
           </div>
         </div>
       </CalmBackground>

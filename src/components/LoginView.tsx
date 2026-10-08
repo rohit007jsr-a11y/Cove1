@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { Mail, Lock, Eye, EyeOff, LogIn, AlertCircle, Sparkles } from 'lucide-react';
 import { CoveLogo } from './CoveLogo';
+import { GoogleSignInButton } from './GoogleSignInButton';
 import { supabase, formatAuthError, isSupabaseConfigured } from '../lib/supabase';
 import { AuthView } from '../types';
 
@@ -116,6 +117,27 @@ export const LoginView: React.FC<LoginViewProps> = ({
             <span>{errorMessage}</span>
           </div>
         )}
+
+        {/* Fast Google Authentication */}
+        <div className="mb-5">
+          <GoogleSignInButton
+            mode="continue"
+            onError={(msg) => {
+              setErrorMessage(msg);
+              showToast('error', 'Google Sign-In Failed', msg);
+            }}
+          />
+        </div>
+
+        {/* Divider */}
+        <div className="relative my-5 text-center text-xs text-[#64748B]">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-[#E2E8F0]" />
+          </div>
+          <span className="relative bg-white px-3 text-[#64748B] font-medium uppercase tracking-wider text-[11px]">
+            or sign in with email
+          </span>
+        </div>
 
         <form onSubmit={handleLogin} className="space-y-4">
           {/* Email */}
