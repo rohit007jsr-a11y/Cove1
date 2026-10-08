@@ -114,9 +114,6 @@ export const GoogleSignInButton: React.FC<GoogleSignInButtonProps> = ({
             <span className="font-semibold text-slate-700 tracking-tight text-xs sm:text-sm">
               {buttonText}
             </span>
-            <span className="ml-auto text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 uppercase tracking-wider">
-              Fast
-            </span>
           </>
         )}
       </button>

@@ -84,6 +84,49 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [usernameError, setUsernameError] = useState<string | null>(null);
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
+  const [otherPresence, setOtherPresence] = useState<{
+    isOnline: boolean;
+    lastSeen?: string;
+    canSeePhoto: boolean;
+    canSeeAbout: boolean;
+  } | null>(null);
+
+  const formatLastSeen = (isoDateStr?: string): string => {
+    if (!isoDateStr) return '';
+    try {
+      const date = new Date(isoDateStr);
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      if (diffMins < 1) return 'last seen just now';
+      if (diffMins < 60) return `last seen ${diffMins}m ago`;
+      const isToday = date.toDateString() === now.toDateString();
+      const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      if (isToday) return `last seen today at ${timeStr}`;
+      return `last seen ${date.toLocaleDateString([], { month: 'short', day: 'numeric' })} at ${timeStr}`;
+    } catch {
+      return '';
+    }
+  };
+
+  useEffect(() => {
+    if (!isSelf && otherProfile?.id) {
+      fetch(`/api/users/${otherProfile.id}/presence?viewerId=${user.id}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data) {
+            setOtherPresence({
+              isOnline: Boolean(data.isOnline),
+              lastSeen: data.lastSeen,
+              canSeePhoto: data.canSeePhoto !== false,
+              canSeeAbout: data.canSeeAbout !== false,
+            });
+          }
+        })
+        .catch(() => {});
+    }
+  }, [isSelf, otherProfile?.id, user.id]);
+
   // Initialize or fetch profile data
   useEffect(() => {
     if (isSelf) {
@@ -243,7 +286,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         {/* Hero Avatar Header */}
         <div className="bg-white border-b border-slate-200 p-6 flex flex-col items-center justify-center text-center space-y-3">
           <div className="relative">
-            {otherAvatar ? (
+            {otherAvatar && (!otherPresence || otherPresence.canSeePhoto) ? (
               <img
                 src={otherAvatar}
                 alt={otherName}
@@ -254,6 +297,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 {otherName.slice(0, 2).toUpperCase()}
               </div>
             )}
+            {otherPresence?.isOnline && (
+              <span className="absolute bottom-1 right-1 w-4 h-4 bg-emerald-500 rounded-full border-2 border-white ring-2 ring-emerald-500/20" title="Online" />
+            )}
           </div>
 
           <div>
@@ -261,7 +307,17 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <p className="text-xs font-semibold text-sky-600 font-mono mt-0.5">
               @{otherUsername.replace(/^@/, '')}
             </p>
-            <p className="text-xs text-slate-500 font-mono mt-1">{otherProfile.email}</p>
+            {otherPresence?.isOnline ? (
+              <p className="text-xs font-bold text-emerald-600 mt-1 flex items-center justify-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse" />
+                Online
+              </p>
+            ) : otherPresence?.lastSeen ? (
+              <p className="text-xs text-slate-500 mt-1 font-medium">
+                {formatLastSeen(otherPresence.lastSeen)}
+              </p>
+            ) : null}
+            <p className="text-xs text-slate-400 font-mono mt-0.5">{otherProfile.email}</p>
           </div>
 
           {/* Action Buttons */}
@@ -307,7 +363,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
               About
             </span>
-            <p className="text-sm font-medium text-slate-800 leading-relaxed">{otherAbout}</p>
+            {otherPresence && !otherPresence.canSeeAbout ? (
+              <p className="text-xs text-slate-400 italic">About is hidden due to user's privacy settings</p>
+            ) : (
+              <p className="text-sm font-medium text-slate-800 leading-relaxed">{otherAbout}</p>
+            )}
           </div>
 
           {/* Email & Copy */}

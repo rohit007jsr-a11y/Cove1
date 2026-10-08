@@ -104,6 +104,37 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const [messageToForward, setMessageToForward] = useState<Message | null>(null);
   const [verifiedPeers, setVerifiedPeers] = useState<Record<string, boolean>>({});
   const [activeCall, setActiveCall] = useState<CallSession | null>(null);
+  const [presenceMap, setPresenceMap] = useState<Record<string, { isOnline: boolean; lastSeen?: string }>>({});
+
+  const formatLastSeen = (isoDateStr?: string): string => {
+    if (!isoDateStr) return 'offline';
+    try {
+      const date = new Date(isoDateStr);
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+
+      if (diffMins < 1) return 'last seen just now';
+      if (diffMins < 60) return `last seen ${diffMins}m ago`;
+
+      const isToday = date.toDateString() === now.toDateString();
+      const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      if (isToday) {
+        return `last seen today at ${timeStr}`;
+      }
+
+      const yesterday = new Date(now);
+      yesterday.setDate(now.getDate() - 1);
+      if (date.toDateString() === yesterday.toDateString()) {
+        return `last seen yesterday at ${timeStr}`;
+      }
+
+      return `last seen ${date.toLocaleDateString([], { month: 'short', day: 'numeric' })} at ${timeStr}`;
+    } catch {
+      return 'offline';
+    }
+  };
 
   useEffect(() => {
     const checkVerified = () => {
@@ -505,6 +536,43 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       }
     });
 
+    // Real-time online presence and last seen updates
+    const unsubscribePresence = realtimeChat.on('presence', (data: any) => {
+      if (data.type === 'presence:update') {
+        const { userId, isOnline, lastSeen } = data;
+        setPresenceMap((prev) => ({
+          ...prev,
+          [userId]: {
+            isOnline: Boolean(isOnline),
+            lastSeen: lastSeen !== undefined ? lastSeen : prev[userId]?.lastSeen,
+          },
+        }));
+        setChatSummaries((prev) =>
+          prev.map((cs) => {
+            if (cs.profile?.id === userId) {
+              return { ...cs, is_online: Boolean(isOnline) };
+            }
+            return cs;
+          })
+        );
+      } else if (data.type === 'presence:response') {
+        const pMap = data.presenceMap || {};
+        setPresenceMap((prev) => ({
+          ...prev,
+          ...pMap,
+        }));
+        setChatSummaries((prev) =>
+          prev.map((cs) => {
+            const p = pMap[cs.profile?.id];
+            if (p) {
+              return { ...cs, is_online: Boolean(p.isOnline) };
+            }
+            return cs;
+          })
+        );
+      }
+    });
+
     return () => {
       unsubscribeMsg();
       unsubscribeStatus();
@@ -515,6 +583,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       unsubscribeStatusUpdates();
       unsubscribeReaction();
       unsubscribeCallEvent();
+      unsubscribePresence();
     };
   }, [activeConversationId, user.id]);
 
@@ -694,7 +763,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               profile: c.profile || { id: otherId, email: 'user@cove.app' },
               last_message: lastMsg,
               unread_count: 0,
-              is_online: true,
+              is_online: Boolean(presenceMap[otherId]?.isOnline),
               is_typing: false,
               updated_at: lastMsg?.created_at || c.created_at,
             };
@@ -760,6 +829,17 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     const interval = setInterval(fetchContactsAndSummaries, 10000);
     return () => clearInterval(interval);
   }, [user.id]);
+
+  // Query online presence for all contacts whenever contacts list changes
+  useEffect(() => {
+    const contactIds = contacts
+      .map((c) => (c.requester_id === user.id ? (c.addressee_id || c.profile?.id) : (c.requester_id || c.profile?.id)))
+      .filter(Boolean) as string[];
+
+    if (contactIds.length > 0) {
+      realtimeChat.queryPresence(contactIds);
+    }
+  }, [contacts, user.id]);
 
   // Fetch message thread when contact or group selected
   useEffect(() => {
@@ -1833,8 +1913,27 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                     >
                       <ArrowLeft className="w-5 h-5" />
                     </button>
-                    <div className="w-9 h-9 rounded-full bg-sky-500/10 text-sky-600 font-bold text-xs flex items-center justify-center shrink-0 border border-sky-500/20 group-hover:scale-105 transition-transform">
-                      {getContactInitials(selectedContact)}
+                    <div className="relative shrink-0">
+                      {selectedContact.profile?.avatar_url ? (
+                        <img
+                          src={selectedContact.profile.avatar_url}
+                          alt="Avatar"
+                          className="w-9 h-9 rounded-full object-cover border border-slate-200"
+                        />
+                      ) : (
+                        <div className="w-9 h-9 rounded-full bg-sky-500/10 text-sky-600 font-bold text-xs flex items-center justify-center border border-sky-500/20 group-hover:scale-105 transition-transform">
+                          {getContactInitials(selectedContact)}
+                        </div>
+                      )}
+                      {(() => {
+                        const targetId = selectedContact.requester_id === user.id
+                          ? (selectedContact.addressee_id || selectedContact.profile?.id)
+                          : (selectedContact.requester_id || selectedContact.profile?.id);
+                        const isUserOnline = targetId ? Boolean(presenceMap[targetId]?.isOnline) : false;
+                        return isUserOnline ? (
+                          <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-white ring-1 ring-emerald-500/20" title="Online" />
+                        ) : null;
+                      })()}
                     </div>
                     <div className="overflow-hidden">
                       <h3 className="font-bold text-sm text-slate-900 group-hover:text-sky-600 truncate leading-tight flex items-center gap-1.5">
@@ -1845,12 +1944,31 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                           <Lock className="w-3 text-slate-400" title="End-to-End Encrypted" />
                         )}
                       </h3>
-                      <p className="text-[11px] text-slate-500 truncate mt-0.5 font-mono">
-                        {isRecipientTyping ? (
-                          <span className="text-sky-600 font-bold animate-pulse">typing...</span>
-                        ) : (
-                          <span>@{selectedContact.profile?.username || getContactName(selectedContact).toLowerCase()}</span>
-                        )}
+                      <p className="text-[11px] truncate mt-0.5">
+                        {(() => {
+                          const targetId = selectedContact.requester_id === user.id
+                            ? (selectedContact.addressee_id || selectedContact.profile?.id)
+                            : (selectedContact.requester_id || selectedContact.profile?.id);
+                          const targetPresence = targetId ? presenceMap[targetId] : null;
+                          const isTargetOnline = targetPresence?.isOnline;
+                          const targetLastSeen = targetPresence?.lastSeen;
+
+                          if (isRecipientTyping) {
+                            return <span className="text-sky-600 font-bold animate-pulse">typing...</span>;
+                          }
+                          if (isTargetOnline) {
+                            return (
+                              <span className="text-emerald-600 font-semibold flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse" />
+                                online
+                              </span>
+                            );
+                          }
+                          if (targetLastSeen) {
+                            return <span className="text-slate-500 font-medium">{formatLastSeen(targetLastSeen)}</span>;
+                          }
+                          return <span className="text-slate-400 font-mono">@{selectedContact.profile?.username || getContactName(selectedContact).toLowerCase()}</span>;
+                        })()}
                       </p>
                     </div>
                   </div>

@@ -227,7 +227,18 @@ function cleanupExpiredStatuses() {
 app.get('/api/statuses', (req, res) => {
   cleanupExpiredStatuses();
   const userId = req.query.userId as string;
-  const activeList = Array.from(statusesMap.values());
+  const rawList = Array.from(statusesMap.values());
+  const activeList = rawList.filter((st) => {
+    if (userId && st.ownerId === userId) return true;
+    const ownerPrivacy = getPrivacySettings(st.ownerId);
+    if (userId && (ownerPrivacy.blockedUsers || []).includes(userId)) return false;
+    if (userId) {
+      const myPrivacy = getPrivacySettings(userId);
+      if ((myPrivacy.blockedUsers || []).includes(st.ownerId)) return false;
+    }
+    if (ownerPrivacy.statusVisibility === 'nobody') return false;
+    return true;
+  });
 
   // Group statuses by owner
   const groupsMap = new Map<string, {
@@ -776,6 +787,11 @@ app.post('/api/privacy/settings', (req, res) => {
   const current = getPrivacySettings(userId);
   const updated = { ...current, ...settings };
   privacySettingsMap.set(userId, updated);
+
+  // If lastSeenVisibility was updated, re-broadcast presence
+  const isOnline = Boolean(clientsMap.get(userId)?.size);
+  broadcastUserPresence(userId, isOnline);
+
   res.json({ success: true, settings: updated });
 });
 
@@ -797,9 +813,64 @@ app.post('/api/privacy/block', (req, res) => {
     isBlocked = true;
   }
   privacySettingsMap.set(userId, current);
+
+  // If blocked, immediately tell the target user that this user is offline
+  if (isBlocked) {
+    const targetSockets = clientsMap.get(targetUserId);
+    if (targetSockets) {
+      targetSockets.forEach((s) => {
+        if (s.readyState === WebSocket.OPEN) {
+          s.send(
+            JSON.stringify({
+              type: 'presence:update',
+              userId,
+              isOnline: false,
+              lastSeen: null,
+            })
+          );
+        }
+      });
+    }
+  } else {
+    // If unblocked, broadcast current presence
+    const isOnline = Boolean(clientsMap.get(userId)?.size);
+    broadcastUserPresence(userId, isOnline);
+  }
+
   res.json({ success: true, blockedUsers: current.blockedUsers, isBlocked });
 });
 
+// REST endpoint to get presence and profile privacy for any user
+app.get('/api/users/:userId/presence', (req, res) => {
+  const targetUserId = req.params.userId;
+  const viewerId = req.query.viewerId as string;
+
+  const uPrivacy = getPrivacySettings(targetUserId);
+  const isBlocked = viewerId ? (uPrivacy.blockedUsers || []).includes(viewerId) : false;
+  const viewerBlockedTarget = viewerId ? (getPrivacySettings(viewerId).blockedUsers || []).includes(targetUserId) : false;
+
+  const sockets = clientsMap.get(targetUserId);
+  const isOnline = Boolean(sockets && sockets.size > 0);
+  const lastSeen = activeUsers.get(targetUserId)?.lastSeen || null;
+
+  if (isBlocked || viewerBlockedTarget || uPrivacy.lastSeenVisibility === 'nobody') {
+    return res.json({
+      userId: targetUserId,
+      isOnline: false,
+      lastSeen: null,
+      canSeePhoto: uPrivacy.profilePhotoVisibility !== 'nobody' && !isBlocked,
+      canSeeAbout: uPrivacy.aboutVisibility !== 'nobody' && !isBlocked,
+    });
+  }
+
+  res.json({
+    userId: targetUserId,
+    isOnline,
+    lastSeen: isOnline ? undefined : lastSeen,
+    canSeePhoto: uPrivacy.profilePhotoVisibility !== 'nobody' && !isBlocked,
+    canSeeAbout: uPrivacy.aboutVisibility !== 'nobody' && !isBlocked,
+  });
+});
 
 app.get('/api/architecture', (req, res) => {
   res.json({
@@ -828,16 +899,46 @@ app.get('/api/architecture', (req, res) => {
 const wss = new WebSocketServer({ server, path: '/ws' });
 
 function broadcastUserPresence(userId: string, isOnline: boolean, userName?: string) {
-  const payload = JSON.stringify({
-    type: 'presence:update',
-    userId,
-    isOnline,
-    userName,
-    timestamp: new Date().toISOString(),
-  });
+  const userPrivacy = getPrivacySettings(userId);
+  const now = new Date().toISOString();
+  if (!isOnline && activeUsers.has(userId)) {
+    activeUsers.get(userId)!.lastSeen = now;
+  }
+  const lastSeenTime = activeUsers.get(userId)?.lastSeen || now;
 
   clientsMap.forEach((sockets, clientUserId) => {
     if (clientUserId !== userId) {
+      // 1. Check if clientUserId is blocked by userId or vice-versa
+      const isBlocked = (userPrivacy.blockedUsers || []).includes(clientUserId);
+      const recipientPrivacy = getPrivacySettings(clientUserId);
+      const recipientBlockedMe = (recipientPrivacy.blockedUsers || []).includes(userId);
+
+      if (isBlocked || recipientBlockedMe || userPrivacy.lastSeenVisibility === 'nobody') {
+        const hiddenPayload = JSON.stringify({
+          type: 'presence:update',
+          userId,
+          isOnline: false,
+          lastSeen: null,
+          userName,
+          timestamp: now,
+        });
+        sockets.forEach((ws) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(hiddenPayload);
+          }
+        });
+        return;
+      }
+
+      const payload = JSON.stringify({
+        type: 'presence:update',
+        userId,
+        isOnline,
+        lastSeen: isOnline ? undefined : lastSeenTime,
+        userName,
+        timestamp: now,
+      });
+
       sockets.forEach((ws) => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(payload);
@@ -949,6 +1050,15 @@ wss.on('connection', (ws: WebSocket) => {
               status: 'sent',
             })
           );
+
+          // Check if receiver has blocked sender
+          if (processedMessage.receiverId) {
+            const receiverPrivacy = getPrivacySettings(processedMessage.receiverId);
+            if (receiverPrivacy.blockedUsers && receiverPrivacy.blockedUsers.includes(processedMessage.senderId)) {
+              // Blocked! Return single tick ack to sender, but DO NOT deliver to receiver and DO NOT queue
+              break;
+            }
+          }
 
           // Check if receiver is online
           const receiverSockets = clientsMap.get(processedMessage.receiverId);
@@ -1160,10 +1270,25 @@ wss.on('connection', (ws: WebSocket) => {
         case 'presence:query': {
           const { userIds } = data;
           if (Array.isArray(userIds)) {
-            const result: Record<string, boolean> = {};
+            const result: Record<string, { isOnline: boolean; lastSeen?: string }> = {};
             userIds.forEach((uid) => {
+              const uPrivacy = getPrivacySettings(uid);
+              const isBlocked = authenticatedUserId ? (uPrivacy.blockedUsers || []).includes(authenticatedUserId) : false;
+              const myPrivacy = authenticatedUserId ? getPrivacySettings(authenticatedUserId) : null;
+              const iBlockedThem = myPrivacy ? (myPrivacy.blockedUsers || []).includes(uid) : false;
+
+              if (isBlocked || iBlockedThem || uPrivacy.lastSeenVisibility === 'nobody') {
+                result[uid] = { isOnline: false };
+                return;
+              }
+
               const sockets = clientsMap.get(uid);
-              result[uid] = Boolean(sockets && sockets.size > 0);
+              const isOnline = Boolean(sockets && sockets.size > 0);
+              const lastSeen = activeUsers.get(uid)?.lastSeen;
+              result[uid] = {
+                isOnline,
+                lastSeen: isOnline ? undefined : lastSeen,
+              };
             });
 
             ws.send(
@@ -1319,6 +1444,21 @@ wss.on('connection', (ws: WebSocket) => {
         case 'call:initiate': {
           const { callId, callerId, callerName, callerAvatar, receiverId, callType } = data;
           if (!receiverId) break;
+
+          // Check if receiver has blocked caller
+          const receiverPrivacy = getPrivacySettings(receiverId);
+          if (receiverPrivacy.blockedUsers && receiverPrivacy.blockedUsers.includes(callerId)) {
+            ws.send(
+              JSON.stringify({
+                type: 'call:declined',
+                callId,
+                receiverId,
+                reason: 'User unavailable',
+              })
+            );
+            break;
+          }
+
           const receiverSockets = clientsMap.get(receiverId);
           if (receiverSockets) {
             receiverSockets.forEach((s) => {

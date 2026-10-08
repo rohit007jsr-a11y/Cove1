@@ -335,6 +335,7 @@ export const AccountSettingsModal: React.FC<AccountSettingsModalProps> = ({
     const updated = await updatePrivacySettings(user.id, { [key]: value });
     if (updated) {
       setPrivacySettings(updated);
+      window.dispatchEvent(new CustomEvent('cove_privacy_updated', { detail: updated }));
       showToast('success', 'Privacy Updated', 'Your settings are synchronized.');
     }
   };
