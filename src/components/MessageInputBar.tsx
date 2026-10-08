@@ -127,53 +127,74 @@ export const MessageInputBar: React.FC<MessageInputBarProps> = ({
     if (onCancelReply) onCancelReply();
   };
 
+  const compressImage = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const maxDim = 1280;
+
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL('image/jpeg', 0.82));
+          } else {
+            resolve(e.target?.result as string);
+          }
+        };
+        img.onerror = () => resolve(e.target?.result as string);
+        img.src = e.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
   const processFileUpload = async (file: File) => {
     setIsUploading(true);
-    const reader = new FileReader();
 
-    reader.onload = async (event) => {
-      const base64Data = event.target?.result as string;
+    let type: MessageType = 'file';
+    if (file.type.startsWith('image/')) type = 'image';
+    else if (file.type.startsWith('video/')) type = 'video';
+    else if (file.type.startsWith('audio/')) type = 'voice_note';
+    else type = 'document';
 
+    if (type === 'image') {
       try {
-        // Post to /api/upload to extract standardized server media metadata
-        const response = await fetch('/api/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fileData: base64Data,
-            fileName: file.name,
-            mimeType: file.type,
-            fileSize: file.size,
-          }),
+        const compressedDataUrl = await compressImage(file);
+        setAttachedMedia({
+          type: 'image',
+          url: compressedDataUrl,
+          name: file.name,
+          thumbnailUrl: compressedDataUrl,
+          mimeType: 'image/jpeg',
+          size: Math.round(compressedDataUrl.length * 0.75),
         });
-
-        if (response.ok) {
-          const res = await response.json();
-          if (res.success && res.media) {
-            setAttachedMedia({
-              type: res.media.type,
-              url: res.media.url,
-              name: res.media.fileName,
-              thumbnailUrl: res.media.thumbnailUrl,
-              mimeType: res.media.mimeType,
-              size: res.media.size,
-              duration: res.media.duration,
-            });
-            setIsUploading(false);
-            return;
-          }
-        }
+        setIsUploading(false);
+        return;
       } catch (err) {
-        console.warn('API upload fallback to direct data URL parsing:', err);
+        console.warn('Image compression fallback:', err);
       }
+    }
 
-      // Fallback local classification
-      let type: MessageType = 'file';
-      if (file.type.startsWith('image/')) type = 'image';
-      else if (file.type.startsWith('video/')) type = 'video';
-      else if (file.type.startsWith('audio/')) type = 'voice_note';
-      else type = 'document';
-
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64Data = event.target?.result as string;
       setAttachedMedia({
         type,
         url: base64Data,
@@ -183,7 +204,6 @@ export const MessageInputBar: React.FC<MessageInputBarProps> = ({
       });
       setIsUploading(false);
     };
-
     reader.readAsDataURL(file);
   };
 

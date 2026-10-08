@@ -27,7 +27,7 @@ import {
   Video,
   Palette,
 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { UserProfile, ContactRequest, Message, Profile, ChatSummary, ReplyPreview, Group, UserStatusGroup, Reaction } from '../types';
 import { CoveLogo } from './CoveLogo';
 import { ContactsView } from './ContactsView';
@@ -620,72 +620,36 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     }
   };
 
-  // Helper to find/create conversation ID
+  const getDeterministicConvId = (userId1: string, userId2: string): string => {
+    const sorted = [userId1, userId2].sort();
+    return `conv_${sorted[0]}_${sorted[1]}`;
+  };
+
+  // Helper to find/create conversation ID instantly without blocking network round-trips
   const getOrCreateConversationId = async (
     myUserId: string,
     otherUserId: string,
     otherProfile?: Profile
-  ): Promise<string | null> => {
-    try {
-      if (!myUserId || !otherUserId) return null;
+  ): Promise<string> => {
+    if (!myUserId || !otherUserId) return '';
+    const convId = getDeterministicConvId(myUserId, otherUserId);
 
-      const generateUUID = (): string => {
-        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-          return crypto.randomUUID();
+    // Sync in background non-blocking if Supabase is configured
+    if (isSupabaseConfigured) {
+      (async () => {
+        try {
+          await supabase.from('conversations').upsert([{ id: convId }], { onConflict: 'id' });
+          await supabase.from('conversation_participants').upsert([
+            { conversation_id: convId, user_id: myUserId },
+            { conversation_id: convId, user_id: otherUserId },
+          ], { onConflict: 'conversation_id,user_id' });
+        } catch {
+          // ignore background sync notice
         }
-        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-          const r = (Math.random() * 16) | 0;
-          return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
-        });
-      };
-
-      try {
-        const profilesToUpsert = [
-          {
-            id: myUserId,
-            email: user.email,
-            display_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Cove Member',
-          },
-        ];
-        if (otherProfile && otherProfile.id) {
-          profilesToUpsert.push({
-            id: otherProfile.id,
-            email: otherProfile.email || 'user@cove.app',
-            display_name: otherProfile.display_name || otherProfile.email?.split('@')[0] || 'Cove Member',
-          });
-        }
-        await supabase.from('profiles').upsert(profilesToUpsert, { onConflict: 'id' });
-      } catch (pErr) {
-        console.log('Notice upserting profiles:', pErr);
-      }
-
-      // Try RPC first
-      try {
-        const { data, error } = await supabase.rpc('create_conversation', {
-          other_user_id: otherUserId,
-        });
-
-        if (!error && data) {
-          const rpcId = typeof data === 'string' ? data : (data as any)?.id ? String((data as any).id) : String(data);
-          if (rpcId && rpcId !== 'null' && !rpcId.startsWith('conv-')) return rpcId;
-        }
-      } catch (rpcErr) {
-        console.warn('create_conversation RPC notice:', rpcErr);
-      }
-
-      // Fallback
-      const newConvId = generateUUID();
-      await supabase.from('conversations').insert([{ id: newConvId }]);
-      await supabase.from('conversation_participants').upsert([
-        { conversation_id: newConvId, user_id: myUserId },
-        { conversation_id: newConvId, user_id: otherUserId },
-      ], { onConflict: 'conversation_id,user_id' });
-
-      return newConvId;
-    } catch (err) {
-      console.error('Error in getOrCreateConversationId:', err);
-      return null;
+      })();
     }
+
+    return convId;
   };
 
   // Fetch contacts and build chat summaries
@@ -1101,20 +1065,57 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         duration: mediaMeta?.duration,
         file_name: fileName,
         created_at: new Date().toISOString(),
-        status: 'sending',
+        status: 'sent',
         reply_to: replyingTo,
         is_group: true,
         group_id: selectedGroup.id,
       };
 
+      // 1. Instant Optimistic UI insert
       setMessages((prev) => [...prev, newMsg]);
       setReplyingTo(null);
-      await idbSaveMessage(newMsg);
 
+      // 2. Non-blocking asynchronous IndexedDB persistence
+      idbSaveMessage(newMsg).catch((err) => console.warn('idbSaveMessage note:', err));
+
+      // 3. Fast WebSocket send
+      let sentSuccess = false;
       if (isOnline) {
-        realtimeChat.sendGroupMessage(newMsg);
-      } else {
-        await idbSavePendingMessage(newMsg);
+        sentSuccess = realtimeChat.sendGroupMessage(newMsg);
+      }
+
+      if (!sentSuccess) {
+        // Immediate HTTP REST API fallback
+        fetch('/api/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: {
+              id: messageId,
+              conversationId: selectedGroup.id,
+              senderId: user.id,
+              senderName: myName,
+              groupId: selectedGroup.id,
+              isGroup: true,
+              content: text,
+              type,
+              mediaUrl,
+              thumbnailUrl: mediaMeta?.thumbnailUrl,
+              mimeType: mediaMeta?.mimeType,
+              fileSize: mediaMeta?.fileSize,
+              duration: mediaMeta?.duration,
+              fileName,
+              createdAt: newMsg.created_at,
+              replyTo: replyingTo ? {
+                id: replyingTo.id,
+                senderName: replyingTo.sender_name,
+                content: replyingTo.content,
+              } : null,
+            },
+          }),
+        }).catch(() => {
+          idbSavePendingMessage(newMsg).catch(() => {});
+        });
       }
       return;
     }
@@ -1127,15 +1128,9 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         ? (selectedContact.addressee_id || selectedContact.profile?.id)
         : (selectedContact.requester_id || selectedContact.profile?.id);
 
-    let convId = activeConversationId;
-    if (!convId) {
-      convId = await getOrCreateConversationId(user.id, otherUserId, selectedContact.profile);
-      if (convId) setActiveConversationId(convId);
-    }
-
-    if (!convId) {
-      showToast('error', 'Session Error', 'Could not start conversation session.');
-      return;
+    const convId = activeConversationId || getDeterministicConvId(user.id, otherUserId);
+    if (!activeConversationId) {
+      setActiveConversationId(convId);
     }
 
     const messageId = generateUUID();
@@ -1154,41 +1149,74 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       duration: mediaMeta?.duration,
       file_name: fileName,
       created_at: new Date().toISOString(),
-      status: 'sending',
+      status: 'sent',
       reply_to: replyingTo,
     };
 
-    // Optimistic UI insert
+    // 1. Instant Optimistic UI insert
     setMessages((prev) => [...prev, newMsg]);
     setReplyingTo(null);
 
-    // Save to IndexedDB
-    await idbSaveMessage(newMsg);
+    // 2. Non-blocking asynchronous IndexedDB persistence
+    idbSaveMessage(newMsg).catch((err) => console.warn('idbSaveMessage note:', err));
 
-    // Send via WebSocket or queue if offline
+    // 3. Fast WebSocket send
+    let sentSuccess = false;
     if (isOnline) {
-      const sentSuccess = realtimeChat.sendMessage(newMsg);
-      if (!sentSuccess) {
-        await idbSavePendingMessage(newMsg);
-      }
-    } else {
-      await idbSavePendingMessage(newMsg);
+      sentSuccess = realtimeChat.sendMessage(newMsg);
     }
 
-    // Backup insert to Supabase database
-    try {
-      await supabase.from('messages').insert([
-        {
-          id: messageId,
-          conversation_id: convId,
-          sender_id: user.id,
-          content: text,
-          type,
-          media_url: mediaUrl,
-        },
-      ]);
-    } catch (err) {
-      console.warn('Supabase fallback insert note:', err);
+    if (!sentSuccess) {
+      // Immediate HTTP REST fallback
+      fetch('/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: {
+            id: messageId,
+            conversationId: convId,
+            senderId: user.id,
+            senderName: myName,
+            receiverId: otherUserId,
+            content: text,
+            type,
+            mediaUrl,
+            thumbnailUrl: mediaMeta?.thumbnailUrl,
+            mimeType: mediaMeta?.mimeType,
+            fileSize: mediaMeta?.fileSize,
+            duration: mediaMeta?.duration,
+            fileName,
+            createdAt: newMsg.created_at,
+            replyTo: replyingTo ? {
+              id: replyingTo.id,
+              senderName: replyingTo.sender_name,
+              content: replyingTo.content,
+            } : null,
+          },
+        }),
+      }).catch(() => {
+        idbSavePendingMessage(newMsg).catch(() => {});
+      });
+    }
+
+    // 4. Background Supabase backup (non-blocking)
+    if (isSupabaseConfigured) {
+      (async () => {
+        try {
+          await supabase.from('messages').insert([
+            {
+              id: messageId,
+              conversation_id: convId,
+              sender_id: user.id,
+              content: text,
+              type,
+              media_url: mediaUrl,
+            },
+          ]);
+        } catch (err) {
+          console.warn('Supabase fallback insert note:', err);
+        }
+      })();
     }
   };
 

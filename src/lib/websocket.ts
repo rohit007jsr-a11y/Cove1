@@ -16,6 +16,7 @@ class RealtimeChatClient {
   private reconnectAttempts: number = 0;
   private maxReconnectAttempts: number = 10;
   private reconnectTimer: any = null;
+  private pendingOutbox: string[] = [];
   private eventListeners: Map<string, Set<EventCallback>> = new Map();
 
   constructor() {
@@ -61,6 +62,7 @@ class RealtimeChatClient {
         this.isConnected = true;
         this.reconnectAttempts = 0;
         this.sendAuth();
+        this.flushPendingOutbox();
         this.emit('connect', { isConnected: true });
       };
 
@@ -86,6 +88,21 @@ class RealtimeChatClient {
     } catch (err) {
       console.error('Failed creating WebSocket client:', err);
       this.scheduleReconnect();
+    }
+  }
+
+  private flushPendingOutbox() {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN && this.pendingOutbox.length > 0) {
+      console.log(`📤 Flushing ${this.pendingOutbox.length} buffered outbox messages`);
+      const queue = [...this.pendingOutbox];
+      this.pendingOutbox = [];
+      queue.forEach((payload) => {
+        try {
+          this.socket!.send(payload);
+        } catch (err) {
+          console.warn('Error flushing outbox item:', err);
+        }
+      });
     }
   }
 
@@ -184,35 +201,40 @@ class RealtimeChatClient {
    * Send Group Message over WebSocket
    */
   public sendGroupMessage(message: Message): boolean {
+    const payload = JSON.stringify({
+      type: 'group:message:send',
+      message: {
+        id: message.id,
+        conversationId: message.conversation_id,
+        senderId: message.sender_id,
+        senderName: message.sender_name,
+        senderAvatar: message.sender_avatar,
+        groupId: message.group_id || message.conversation_id,
+        isGroup: true,
+        content: message.content,
+        type: message.type || 'text',
+        mediaUrl: message.media_url,
+        thumbnailUrl: message.thumbnail_url,
+        mimeType: message.mime_type,
+        fileSize: message.file_size,
+        duration: message.duration,
+        fileName: message.file_name,
+        createdAt: message.created_at,
+        status: message.status || 'sending',
+        replyTo: message.reply_to ? {
+          id: message.reply_to.id,
+          senderName: message.reply_to.sender_name,
+          content: message.reply_to.content,
+        } : null,
+      },
+    });
+
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-      const payload = {
-        type: 'group:message:send',
-        message: {
-          id: message.id,
-          conversationId: message.conversation_id,
-          senderId: message.sender_id,
-          senderName: message.sender_name,
-          senderAvatar: message.sender_avatar,
-          groupId: message.group_id || message.conversation_id,
-          isGroup: true,
-          content: message.content,
-          type: message.type || 'text',
-          mediaUrl: message.media_url,
-          thumbnailUrl: message.thumbnail_url,
-          mimeType: message.mime_type,
-          fileSize: message.file_size,
-          duration: message.duration,
-          fileName: message.file_name,
-          createdAt: message.created_at,
-          status: message.status || 'sending',
-          replyTo: message.reply_to ? {
-            id: message.reply_to.id,
-            senderName: message.reply_to.sender_name,
-            content: message.reply_to.content,
-          } : null,
-        },
-      };
-      this.socket.send(JSON.stringify(payload));
+      this.socket.send(payload);
+      return true;
+    }
+    if (this.socket && this.socket.readyState === WebSocket.CONNECTING) {
+      this.pendingOutbox.push(payload);
       return true;
     }
     return false;
@@ -222,32 +244,37 @@ class RealtimeChatClient {
    * Send 1:1 Message over WebSocket
    */
   public sendMessage(message: Message): boolean {
+    const payload = JSON.stringify({
+      type: 'message:send',
+      message: {
+        id: message.id,
+        conversationId: message.conversation_id,
+        senderId: message.sender_id,
+        receiverId: message.receiver_id,
+        content: message.content,
+        type: message.type || 'text',
+        mediaUrl: message.media_url,
+        thumbnailUrl: message.thumbnail_url,
+        mimeType: message.mime_type,
+        fileSize: message.file_size,
+        duration: message.duration,
+        fileName: message.file_name,
+        createdAt: message.created_at,
+        status: message.status || 'sending',
+        replyTo: message.reply_to ? {
+          id: message.reply_to.id,
+          senderName: message.reply_to.sender_name,
+          content: message.reply_to.content,
+        } : null,
+      },
+    });
+
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-      const payload = {
-        type: 'message:send',
-        message: {
-          id: message.id,
-          conversationId: message.conversation_id,
-          senderId: message.sender_id,
-          receiverId: message.receiver_id,
-          content: message.content,
-          type: message.type || 'text',
-          mediaUrl: message.media_url,
-          thumbnailUrl: message.thumbnail_url,
-          mimeType: message.mime_type,
-          fileSize: message.file_size,
-          duration: message.duration,
-          fileName: message.file_name,
-          createdAt: message.created_at,
-          status: message.status || 'sending',
-          replyTo: message.reply_to ? {
-            id: message.reply_to.id,
-            senderName: message.reply_to.sender_name,
-            content: message.reply_to.content,
-          } : null,
-        },
-      };
-      this.socket.send(JSON.stringify(payload));
+      this.socket.send(payload);
+      return true;
+    }
+    if (this.socket && this.socket.readyState === WebSocket.CONNECTING) {
+      this.pendingOutbox.push(payload);
       return true;
     }
     return false;

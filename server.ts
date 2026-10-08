@@ -432,6 +432,111 @@ app.post('/api/upload', (req, res) => {
   }
 });
 
+// REST API for instant Message Sending (Fast HTTP fallback and direct sync)
+app.post('/api/messages', (req, res) => {
+  try {
+    const { message } = req.body;
+    if (!message || !message.senderId) {
+      return res.status(400).json({ error: 'Missing message or senderId' });
+    }
+
+    const processedMessage: MessagePayload = {
+      ...message,
+      status: 'sent',
+      createdAt: message.createdAt || new Date().toISOString(),
+    };
+
+    const convId = processedMessage.conversationId || (processedMessage.isGroup ? processedMessage.groupId : 'default');
+    if (!conversationMessages.has(convId)) {
+      conversationMessages.set(convId, []);
+    }
+    conversationMessages.get(convId)!.push(processedMessage);
+
+    if (processedMessage.isGroup && processedMessage.groupId) {
+      // Broadcast to all participants of the group except sender
+      broadcastToGroup(
+        processedMessage.groupId,
+        {
+          type: 'message:receive',
+          message: processedMessage,
+        },
+        processedMessage.senderId
+      );
+      return res.json({ success: true, message: processedMessage });
+    }
+
+    // Direct 1:1 message flow
+    if (processedMessage.receiverId) {
+      // Check privacy: blocked users check
+      const receiverPrivacy = getPrivacySettings(processedMessage.receiverId);
+      if (receiverPrivacy.blockedUsers && receiverPrivacy.blockedUsers.includes(processedMessage.senderId)) {
+        return res.json({ success: true, message: processedMessage, blocked: true });
+      }
+
+      const receiverSockets = clientsMap.get(processedMessage.receiverId);
+      let isDelivered = false;
+
+      if (receiverSockets && receiverSockets.size > 0) {
+        receiverSockets.forEach((rSocket) => {
+          if (rSocket.readyState === WebSocket.OPEN) {
+            processedMessage.status = 'delivered';
+            rSocket.send(
+              JSON.stringify({
+                type: 'message:receive',
+                message: processedMessage,
+              })
+            );
+            isDelivered = true;
+          }
+        });
+      }
+
+      if (isDelivered) {
+        // Notify sender socket if connected
+        const senderSockets = clientsMap.get(processedMessage.senderId);
+        if (senderSockets) {
+          senderSockets.forEach((s) => {
+            if (s.readyState === WebSocket.OPEN) {
+              s.send(
+                JSON.stringify({
+                  type: 'message:status_updated',
+                  messageId: processedMessage.id,
+                  conversationId: processedMessage.conversationId,
+                  status: 'delivered',
+                  receiverId: processedMessage.receiverId,
+                })
+              );
+            }
+          });
+        }
+      } else {
+        // Queue in offline queue for receiver
+        if (!offlineQueue.has(processedMessage.receiverId)) {
+          offlineQueue.set(processedMessage.receiverId, []);
+        }
+        offlineQueue.get(processedMessage.receiverId)!.push(processedMessage);
+
+        sendPushNotification(
+          processedMessage.receiverId,
+          processedMessage.senderName || 'New Message',
+          processedMessage.content || 'Sent a media attachment',
+          {
+            type: 'message',
+            chatId: processedMessage.conversationId,
+            senderId: processedMessage.senderId,
+            messageId: processedMessage.id,
+          }
+        ).catch(() => {});
+      }
+    }
+
+    res.json({ success: true, message: processedMessage });
+  } catch (err: any) {
+    console.error('Error handling /api/messages:', err);
+    res.status(500).json({ error: err.message || 'Failed to send message' });
+  }
+});
+
 // REST API for Groups
 app.get('/api/groups', (req, res) => {
   const userId = req.query.userId as string;
