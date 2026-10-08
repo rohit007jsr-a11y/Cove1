@@ -46,6 +46,7 @@ export const StatusList: React.FC<StatusListProps> = ({
   const viewedGroups = otherGroups.filter((g) => !g.hasUnviewed);
 
   const handleOpenGroupViewer = (group: UserStatusGroup) => {
+    if (!group || !Array.isArray(group.statuses) || group.statuses.length === 0) return;
     const idx = statusGroups.findIndex((g) => g.ownerId === group.ownerId);
     setActiveGroupIndex(idx >= 0 ? idx : 0);
     setIsViewerOpen(true);
@@ -190,7 +191,7 @@ export const StatusList: React.FC<StatusListProps> = ({
             >
               <Eye className="w-3.5 h-3.5 text-sky-600" />
               <span>
-                {ownGroup.statuses.reduce((acc, curr) => acc + curr.viewers.length, 0)}
+                {ownGroup.statuses.reduce((acc, curr) => acc + (curr.viewers?.length || 0), 0)}
               </span>
             </button>
           )}

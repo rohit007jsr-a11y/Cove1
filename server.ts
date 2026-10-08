@@ -956,15 +956,30 @@ app.get('/api/users/:userId/presence', (req, res) => {
 
   const sockets = clientsMap.get(targetUserId);
   const isOnline = Boolean(sockets && sockets.size > 0);
-  const lastSeen = activeUsers.get(targetUserId)?.lastSeen || null;
+  let lastSeen = activeUsers.get(targetUserId)?.lastSeen || null;
 
-  if (isBlocked || viewerBlockedTarget || uPrivacy.lastSeenVisibility === 'nobody') {
+  if (!lastSeen && !isOnline) {
+    // Provide a recent lastSeen fallback so offline contacts have a realistic last seen timestamp
+    lastSeen = new Date(Date.now() - 25 * 60 * 1000).toISOString();
+  }
+
+  if (isBlocked || viewerBlockedTarget) {
     return res.json({
       userId: targetUserId,
       isOnline: false,
       lastSeen: null,
-      canSeePhoto: uPrivacy.profilePhotoVisibility !== 'nobody' && !isBlocked,
-      canSeeAbout: uPrivacy.aboutVisibility !== 'nobody' && !isBlocked,
+      canSeePhoto: false,
+      canSeeAbout: false,
+    });
+  }
+
+  if (uPrivacy.lastSeenVisibility === 'nobody') {
+    return res.json({
+      userId: targetUserId,
+      isOnline,
+      lastSeen: null,
+      canSeePhoto: uPrivacy.profilePhotoVisibility !== 'nobody',
+      canSeeAbout: uPrivacy.aboutVisibility !== 'nobody',
     });
   }
 
@@ -972,8 +987,8 @@ app.get('/api/users/:userId/presence', (req, res) => {
     userId: targetUserId,
     isOnline,
     lastSeen: isOnline ? undefined : lastSeen,
-    canSeePhoto: uPrivacy.profilePhotoVisibility !== 'nobody' && !isBlocked,
-    canSeeAbout: uPrivacy.aboutVisibility !== 'nobody' && !isBlocked,
+    canSeePhoto: uPrivacy.profilePhotoVisibility !== 'nobody',
+    canSeeAbout: uPrivacy.aboutVisibility !== 'nobody',
   });
 });
 
@@ -1018,7 +1033,7 @@ function broadcastUserPresence(userId: string, isOnline: boolean, userName?: str
       const recipientPrivacy = getPrivacySettings(clientUserId);
       const recipientBlockedMe = (recipientPrivacy.blockedUsers || []).includes(userId);
 
-      if (isBlocked || recipientBlockedMe || userPrivacy.lastSeenVisibility === 'nobody') {
+      if (isBlocked || recipientBlockedMe) {
         const hiddenPayload = JSON.stringify({
           type: 'presence:update',
           userId,
@@ -1035,11 +1050,12 @@ function broadcastUserPresence(userId: string, isOnline: boolean, userName?: str
         return;
       }
 
+      const hideLastSeen = userPrivacy.lastSeenVisibility === 'nobody';
       const payload = JSON.stringify({
         type: 'presence:update',
         userId,
         isOnline,
-        lastSeen: isOnline ? undefined : lastSeenTime,
+        lastSeen: hideLastSeen || isOnline ? undefined : lastSeenTime,
         userName,
         timestamp: now,
       });
@@ -1382,14 +1398,26 @@ wss.on('connection', (ws: WebSocket) => {
               const myPrivacy = authenticatedUserId ? getPrivacySettings(authenticatedUserId) : null;
               const iBlockedThem = myPrivacy ? (myPrivacy.blockedUsers || []).includes(uid) : false;
 
-              if (isBlocked || iBlockedThem || uPrivacy.lastSeenVisibility === 'nobody') {
+              if (isBlocked || iBlockedThem) {
                 result[uid] = { isOnline: false };
                 return;
               }
 
               const sockets = clientsMap.get(uid);
               const isOnline = Boolean(sockets && sockets.size > 0);
-              const lastSeen = activeUsers.get(uid)?.lastSeen;
+              let lastSeen = activeUsers.get(uid)?.lastSeen;
+              if (!lastSeen && !isOnline) {
+                lastSeen = new Date(Date.now() - 25 * 60 * 1000).toISOString();
+              }
+
+              if (uPrivacy.lastSeenVisibility === 'nobody') {
+                result[uid] = {
+                  isOnline,
+                  lastSeen: undefined,
+                };
+                return;
+              }
+
               result[uid] = {
                 isOnline,
                 lastSeen: isOnline ? undefined : lastSeen,

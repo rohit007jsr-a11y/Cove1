@@ -50,19 +50,29 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({
   const [showViewersDrawer, setShowViewersDrawer] = useState(false);
   const [replyText, setReplyText] = useState('');
   const [isMuted, setIsMuted] = useState(false);
+  const [mediaError, setMediaError] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
+  // Filter to only groups that have valid statuses
+  const validGroups = (statusGroups || []).filter(
+    (g) => g && Array.isArray(g.statuses) && g.statuses.length > 0
+  );
+
   useEffect(() => {
-    setGroupIndex(initialGroupIndex);
+    setGroupIndex(Math.min(Math.max(0, initialGroupIndex), Math.max(0, validGroups.length - 1)));
     setItemIndex(0);
     setProgress(0);
     setIsPaused(false);
     setShowViewersDrawer(false);
-  }, [initialGroupIndex, isOpen]);
+    setMediaError(false);
+  }, [initialGroupIndex, isOpen, validGroups.length]);
 
-  const activeGroup = statusGroups[groupIndex] || statusGroups[0];
-  const activeStatus: StatusItem | undefined = activeGroup?.statuses[itemIndex];
+  const safeGroupIndex = Math.min(Math.max(0, groupIndex), Math.max(0, validGroups.length - 1));
+  const activeGroup = validGroups[safeGroupIndex];
+  const statuses = activeGroup?.statuses || [];
+  const safeItemIndex = Math.min(Math.max(0, itemIndex), Math.max(0, statuses.length - 1));
+  const activeStatus: StatusItem | undefined = statuses[safeItemIndex];
   const isOwn = activeGroup?.ownerId === currentUserId;
 
   // Mark status as viewed when displayed
@@ -73,35 +83,45 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({
   }, [isOpen, activeStatus?.id, isOwn, onMarkViewed]);
 
   const handleNext = useCallback(() => {
-    if (!activeGroup) return;
+    if (!activeGroup || statuses.length === 0) {
+      onClose();
+      return;
+    }
 
-    if (itemIndex < activeGroup.statuses.length - 1) {
+    if (safeItemIndex < statuses.length - 1) {
       setItemIndex((prev) => prev + 1);
       setProgress(0);
-    } else if (groupIndex < statusGroups.length - 1) {
+      setMediaError(false);
+    } else if (safeGroupIndex < validGroups.length - 1) {
       setGroupIndex((prev) => prev + 1);
       setItemIndex(0);
       setProgress(0);
+      setMediaError(false);
     } else {
       onClose();
     }
-  }, [activeGroup, itemIndex, groupIndex, statusGroups.length, onClose]);
+  }, [activeGroup, statuses.length, safeItemIndex, safeGroupIndex, validGroups.length, onClose]);
 
   const handlePrev = useCallback(() => {
-    if (!activeGroup) return;
+    if (!activeGroup || statuses.length === 0) {
+      onClose();
+      return;
+    }
 
-    if (itemIndex > 0) {
+    if (safeItemIndex > 0) {
       setItemIndex((prev) => prev - 1);
       setProgress(0);
-    } else if (groupIndex > 0) {
-      const prevGroup = statusGroups[groupIndex - 1];
+      setMediaError(false);
+    } else if (safeGroupIndex > 0) {
+      const prevGroup = validGroups[safeGroupIndex - 1];
       setGroupIndex((prev) => prev - 1);
-      setItemIndex(prevGroup ? prevGroup.statuses.length - 1 : 0);
+      setItemIndex(prevGroup && prevGroup.statuses ? Math.max(0, prevGroup.statuses.length - 1) : 0);
       setProgress(0);
+      setMediaError(false);
     } else {
       setProgress(0);
     }
-  }, [activeGroup, itemIndex, groupIndex, statusGroups]);
+  }, [activeGroup, statuses.length, safeItemIndex, safeGroupIndex, validGroups, onClose]);
 
   // Slideshow Progress Timer
   useEffect(() => {
@@ -195,10 +215,10 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({
           {/* Top Segmented Progress Bars */}
           <div className="absolute top-0 left-0 right-0 z-30 p-3 bg-gradient-to-b from-black/80 via-black/40 to-transparent space-y-2">
             <div className="flex items-center gap-1.5">
-              {activeGroup.statuses.map((st, idx) => {
+              {statuses.map((st, idx) => {
                 let barWidth = 0;
-                if (idx < itemIndex) barWidth = 100;
-                else if (idx === itemIndex) barWidth = progress;
+                if (idx < safeItemIndex) barWidth = 100;
+                else if (idx === safeItemIndex) barWidth = progress;
                 else barWidth = 0;
 
                 return (
@@ -255,7 +275,15 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({
                     onClick={() => {
                       if (confirm('Delete this status update?')) {
                         onDeleteStatus(activeStatus.id);
-                        handleNext();
+                        if (statuses.length <= 1) {
+                          if (validGroups.length <= 1) {
+                            onClose();
+                          } else {
+                            handleNext();
+                          }
+                        } else {
+                          handleNext();
+                        }
                       }
                     }}
                     className="p-2 hover:bg-red-500/80 rounded-full text-white transition-colors"
@@ -287,25 +315,35 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({
             className="flex-1 w-full relative flex items-center justify-center cursor-pointer overflow-hidden bg-slate-900"
           >
             {/* 1. Image Story */}
-            {activeStatus.type === 'image' && activeStatus.contentUrl && (
+            {activeStatus.type === 'image' && activeStatus.contentUrl && !mediaError && (
               <img
                 src={activeStatus.contentUrl}
                 alt="Story Content"
+                onError={() => setMediaError(true)}
                 className="w-full h-full object-cover"
               />
             )}
 
             {/* 2. Video Story */}
-            {activeStatus.type === 'video' && activeStatus.contentUrl && (
+            {activeStatus.type === 'video' && activeStatus.contentUrl && !mediaError && (
               <video
                 ref={videoRef}
                 src={activeStatus.contentUrl}
                 autoPlay
                 playsInline
                 muted={isMuted}
+                onError={() => setMediaError(true)}
                 className="w-full h-full object-cover"
                 onEnded={handleNext}
               />
+            )}
+
+            {/* Fallback if image/video failed to load */}
+            {mediaError && (
+              <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center text-slate-300">
+                <p className="text-sm font-semibold">Media unavailable</p>
+                <p className="text-xs text-slate-400 mt-1">This photo or video could not be loaded.</p>
+              </div>
             )}
 
             {/* 3. Text Story Canvas */}
@@ -341,7 +379,7 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({
                 className="flex items-center gap-2 px-5 py-2.5 bg-white/20 hover:bg-white/30 text-white rounded-full backdrop-blur-md transition-all text-xs font-bold border border-white/20 active:scale-95 shadow-lg"
               >
                 <Eye className="w-4 h-4 text-sky-400" />
-                <span>{activeStatus.viewers.length} Views</span>
+                <span>{activeStatus.viewers?.length || 0} Views</span>
               </button>
             ) : (
               <form
@@ -382,7 +420,7 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({
                 <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                   <div className="flex items-center gap-2">
                     <Eye className="w-5 h-5 text-sky-400" />
-                    <h3 className="font-bold text-sm">Viewed by ({activeStatus.viewers.length})</h3>
+                    <h3 className="font-bold text-sm">Viewed by ({activeStatus.viewers?.length || 0})</h3>
                   </div>
                   <button
                     onClick={() => {
@@ -396,7 +434,7 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({
                 </div>
 
                 <div className="flex-1 overflow-y-auto py-2 space-y-3 divide-y divide-slate-800/60">
-                  {activeStatus.viewers.length === 0 ? (
+                  {(!activeStatus.viewers || activeStatus.viewers.length === 0) ? (
                     <div className="text-center py-8 text-slate-400 text-xs font-medium">
                       No views yet. Check back soon!
                     </div>

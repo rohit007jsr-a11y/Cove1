@@ -36,36 +36,48 @@ const BG_GRADIENTS = [
 ];
 
 // High-speed canvas downscaling so camera photos upload instantly without failing payload limits
-function compressImage(file: File, maxDimension = 1440, quality = 0.85): Promise<string> {
-  return new Promise((resolve, reject) => {
+function compressImage(file: File, maxDimension = 1200, quality = 0.75): Promise<string> {
+  return new Promise((resolve) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error('Failed to read image file'));
+    reader.onerror = () => resolve('');
     reader.onload = (e) => {
+      const dataUrl = (e.target?.result as string) || '';
+      if (!dataUrl) {
+        resolve('');
+        return;
+      }
       const img = new Image();
-      img.onerror = () => reject(new Error('Failed to decode image'));
-      img.onload = () => {
-        let { width, height } = img;
-        if (width > maxDimension || height > maxDimension) {
-          if (width > height) {
-            height = Math.round((height * maxDimension) / width);
-            width = maxDimension;
-          } else {
-            width = Math.round((width * maxDimension) / height);
-            height = maxDimension;
-          }
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(e.target?.result as string);
-          return;
-        }
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
+      img.onerror = () => {
+        // Fallback: if browser cannot decode into canvas (e.g. SVG or raw format), return original dataUrl
+        resolve(dataUrl);
       };
-      img.src = e.target?.result as string;
+      img.onload = () => {
+        try {
+          let { width, height } = img;
+          if (width > maxDimension || height > maxDimension) {
+            if (width > height) {
+              height = Math.round((height * maxDimension) / width);
+              width = maxDimension;
+            } else {
+              width = Math.round((width * maxDimension) / height);
+              height = maxDimension;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(dataUrl);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        } catch {
+          resolve(dataUrl);
+        }
+      };
+      img.src = dataUrl;
     };
     reader.readAsDataURL(file);
   });
@@ -96,8 +108,8 @@ export const CreateStatusModal: React.FC<CreateStatusModalProps> = ({
     setErrorMessage(null);
     if (!file) return;
 
-    const isVideo = file.type.startsWith('video/');
-    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|mov|ogg|m4v)$/i.test(file.name);
+    const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|bmp|heic|heif|avif)$/i.test(file.name) || (!file.type && !isVideo);
 
     if (!isVideo && !isImage) {
       setErrorMessage('Please select a valid image (JPG, PNG, WebP) or video (MP4, WebM) file.');
@@ -114,10 +126,13 @@ export const CreateStatusModal: React.FC<CreateStatusModalProps> = ({
       if (isImage) {
         // Automatically optimize and downscale image
         const optimizedUrl = await compressImage(file);
+        if (!optimizedUrl) {
+          throw new Error('Image compression returned empty content.');
+        }
         setMediaData({
           url: optimizedUrl,
           type: 'image',
-          name: file.name,
+          name: file.name || 'photo.jpg',
         });
       } else {
         // Video file

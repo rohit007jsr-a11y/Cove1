@@ -802,6 +802,24 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
     if (contactIds.length > 0) {
       realtimeChat.queryPresence(contactIds);
+
+      // Fast HTTP presence sync so lastSeen is immediately populated
+      contactIds.forEach((uid) => {
+        fetch(`/api/users/${uid}/presence?viewerId=${user.id}`)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
+            if (data) {
+              setPresenceMap((prev) => ({
+                ...prev,
+                [uid]: {
+                  isOnline: Boolean(data.isOnline),
+                  lastSeen: data.lastSeen,
+                },
+              }));
+            }
+          })
+          .catch(() => {});
+      });
     }
   }, [contacts, user.id]);
 
@@ -831,6 +849,24 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           selectedContact.requester_id === user.id
             ? (selectedContact.addressee_id || selectedContact.profile?.id)
             : (selectedContact.requester_id || selectedContact.profile?.id);
+
+        if (otherUserId) {
+          realtimeChat.queryPresence([otherUserId]);
+          fetch(`/api/users/${otherUserId}/presence?viewerId=${user.id}`)
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+              if (data && isMounted) {
+                setPresenceMap((prev) => ({
+                  ...prev,
+                  [otherUserId]: {
+                    isOnline: Boolean(data.isOnline),
+                    lastSeen: data.lastSeen,
+                  },
+                }));
+              }
+            })
+            .catch(() => {});
+        }
 
         const convId = await getOrCreateConversationId(user.id, otherUserId, selectedContact.profile);
         if (!isMounted) return;
@@ -1074,6 +1110,18 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       // 1. Instant Optimistic UI insert
       setMessages((prev) => [...prev, newMsg]);
       setReplyingTo(null);
+      setChatSummaries((prev) =>
+        prev.map((cs) => {
+          if (cs.conversation_id === selectedGroup.id) {
+            return {
+              ...cs,
+              last_message: newMsg,
+              updated_at: newMsg.created_at,
+            };
+          }
+          return cs;
+        })
+      );
 
       // 2. Non-blocking asynchronous IndexedDB persistence
       idbSaveMessage(newMsg).catch((err) => console.warn('idbSaveMessage note:', err));
@@ -1156,6 +1204,21 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     // 1. Instant Optimistic UI insert
     setMessages((prev) => [...prev, newMsg]);
     setReplyingTo(null);
+    setChatSummaries((prev) =>
+      prev.map((cs) => {
+        if (
+          cs.conversation_id === convId ||
+          (selectedContact && (cs.contact_id === selectedContact.id || cs.profile?.id === otherUserId))
+        ) {
+          return {
+            ...cs,
+            last_message: newMsg,
+            updated_at: newMsg.created_at,
+          };
+        }
+        return cs;
+      })
+    );
 
     // 2. Non-blocking asynchronous IndexedDB persistence
     idbSaveMessage(newMsg).catch((err) => console.warn('idbSaveMessage note:', err));
