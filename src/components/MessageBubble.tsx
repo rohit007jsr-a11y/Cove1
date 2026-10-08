@@ -4,6 +4,7 @@ import {
   Clock,
   Check,
   CheckCheck,
+  AlertCircle,
   Play,
   FileText,
   Download,
@@ -34,6 +35,7 @@ interface MessageBubbleProps {
   onDelete?: (messageId: string) => void;
   onOpenMediaViewer?: (message: Message) => void;
   onJumpToMessage?: (messageId: string) => void;
+  onRetry?: (message: Message) => void;
 }
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '👏'];
@@ -57,6 +59,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   onDelete,
   onOpenMediaViewer,
   onJumpToMessage,
+  onRetry,
 }) => {
   const [isLoaded, setIsLoaded] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
@@ -515,8 +518,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 {status === 'delivered' && (
                   <CheckCheck className="w-3.5 h-3.5 text-sky-100 stroke-[2.5]" title="Delivered to recipient" />
                 )}
-                {status === 'read' && (
-                  <CheckCheck className="w-3.5 h-3.5 text-cyan-200 stroke-[3]" title="Read by recipient" />
+                {status === 'failed' && (
+                  <button
+                    onClick={() => onRetry && onRetry(message)}
+                    className="flex items-center gap-1 text-[10px] text-rose-200 hover:text-white bg-rose-600 px-1.5 py-0.5 rounded shadow-xs cursor-pointer"
+                    title="Tap to retry sending"
+                  >
+                    <AlertCircle className="w-3 h-3 text-white" />
+                    <span>Failed (Tap to retry)</span>
+                  </button>
                 )}
               </span>
             )}

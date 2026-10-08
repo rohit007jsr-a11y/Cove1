@@ -78,7 +78,7 @@ interface GroupData {
 }
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const server = http.createServer(app);
 
 app.use(express.json({ limit: '50mb' }));
@@ -124,10 +124,15 @@ function broadcastToAll(payloadObj: any) {
 
 // API REST routes
 app.get('/api/health', (req, res) => {
+  let queuedMessages = 0;
+  offlineQueue.forEach((q) => { queuedMessages += q.length; });
   res.json({
     status: 'ok',
+    port: PORT,
     connectedClients: clientsMap.size,
+    queuedMessages,
     groupsCount: groupsMap.size,
+    uptime: process.uptime(),
     timestamp: new Date().toISOString(),
   });
 });
@@ -432,22 +437,43 @@ app.post('/api/upload', (req, res) => {
   }
 });
 
-// REST API for Message History Query
+// REST API for Message History Query (with pagination)
 app.get('/api/messages', (req, res) => {
   const conversationId = req.query.conversationId as string;
   if (!conversationId) {
     return res.status(400).json({ error: 'Missing conversationId' });
   }
-  const msgs = conversationMessages.get(conversationId) || [];
-  res.json({ success: true, messages: msgs });
+  const limit = Number(req.query.limit) || 50;
+  const before = req.query.before as string;
+
+  let msgs = conversationMessages.get(conversationId) || [];
+  if (before) {
+    const beforeTime = new Date(before).getTime();
+    msgs = msgs.filter((m) => new Date(m.createdAt).getTime() < beforeTime);
+  }
+  const slice = msgs.slice(-limit);
+  res.json({ success: true, messages: slice, hasMore: msgs.length > limit });
 });
 
 // REST API for instant Message Sending (Fast HTTP fallback and direct sync)
 app.post('/api/messages', (req, res) => {
   try {
     const { message } = req.body;
-    if (!message || !message.senderId) {
-      return res.status(400).json({ error: 'Missing message or senderId' });
+    if (!message || !message.senderId || !message.id) {
+      return res.status(400).json({ error: 'Missing message, senderId or id' });
+    }
+
+    if (!message.isGroup && (!message.conversationId || !message.conversationId.startsWith('conv_'))) {
+      return res.status(400).json({ error: 'Invalid conversationId', code: 'BAD_CONVERSATION_ID' });
+    }
+
+    if (!message.isGroup && !message.receiverId) {
+      const parts = message.conversationId.replace('conv_', '').split('_');
+      message.receiverId = parts.find((p) => p !== message.senderId);
+    }
+
+    if (!message.isGroup && !message.receiverId) {
+      return res.status(400).json({ error: 'Missing receiverId', code: 'NO_RECEIVER' });
     }
 
     const processedMessage: MessagePayload = {
@@ -456,20 +482,17 @@ app.post('/api/messages', (req, res) => {
       createdAt: message.createdAt || new Date().toISOString(),
     };
 
-    // Auto-infer receiverId if missing in 1:1 conversation
-    if (!processedMessage.receiverId && processedMessage.conversationId?.startsWith('conv_')) {
-      const parts = processedMessage.conversationId.replace('conv_', '').split('_');
-      processedMessage.receiverId = parts.find((p) => p !== processedMessage.senderId);
-    }
-
     const convId = processedMessage.conversationId || (processedMessage.isGroup ? processedMessage.groupId : 'default');
     if (!conversationMessages.has(convId)) {
       conversationMessages.set(convId, []);
     }
-    conversationMessages.get(convId)!.push(processedMessage);
+    const list = conversationMessages.get(convId)!;
+    if (!list.some((m) => m.id === processedMessage.id)) {
+      list.push(processedMessage);
+      if (list.length > 500) list.shift();
+    }
 
     if (processedMessage.isGroup && processedMessage.groupId) {
-      // Broadcast to all participants of the group except sender
       broadcastToGroup(
         processedMessage.groupId,
         {
@@ -481,9 +504,7 @@ app.post('/api/messages', (req, res) => {
       return res.json({ success: true, message: processedMessage });
     }
 
-    // Direct 1:1 message flow
     if (processedMessage.receiverId) {
-      // Check privacy: blocked users check
       const receiverPrivacy = getPrivacySettings(processedMessage.receiverId);
       if (receiverPrivacy.blockedUsers && receiverPrivacy.blockedUsers.includes(processedMessage.senderId)) {
         return res.json({ success: true, message: processedMessage, blocked: true });
@@ -508,7 +529,6 @@ app.post('/api/messages', (req, res) => {
       }
 
       if (isDelivered) {
-        // Notify sender socket if connected
         const senderSockets = clientsMap.get(processedMessage.senderId);
         if (senderSockets) {
           senderSockets.forEach((s) => {
@@ -526,11 +546,14 @@ app.post('/api/messages', (req, res) => {
           });
         }
       } else {
-        // Queue in offline queue for receiver
         if (!offlineQueue.has(processedMessage.receiverId)) {
           offlineQueue.set(processedMessage.receiverId, []);
         }
-        offlineQueue.get(processedMessage.receiverId)!.push(processedMessage);
+        const q = offlineQueue.get(processedMessage.receiverId)!;
+        if (!q.some((m) => m.id === processedMessage.id)) {
+          q.push(processedMessage);
+          if (q.length > 200) q.shift();
+        }
 
         sendPushNotification(
           processedMessage.receiverId,
@@ -1162,37 +1185,70 @@ wss.on('connection', (ws: WebSocket) => {
         // 2. Client sends a 1:1 message
         case 'message:send': {
           const { message } = data as { message: MessagePayload };
-          if (!message || !message.senderId) return;
+          if (!message || !message.senderId || !message.id) return;
 
-          // Auto-infer receiverId if missing in 1:1 conversation
-          if (!message.receiverId && message.conversationId?.startsWith('conv_')) {
+          if (!message.conversationId || !message.conversationId.startsWith('conv_')) {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(
+                JSON.stringify({
+                  type: 'message:error',
+                  messageId: message.id,
+                  conversationId: message.conversationId,
+                  code: 'BAD_CONVERSATION_ID',
+                  reason: 'Invalid conversation ID format',
+                })
+              );
+            }
+            break;
+          }
+
+          if (!message.receiverId) {
             const parts = message.conversationId.replace('conv_', '').split('_');
             message.receiverId = parts.find((p) => p !== message.senderId);
           }
 
-          // Mark message as 'sent' by server
+          if (!message.receiverId) {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(
+                JSON.stringify({
+                  type: 'message:error',
+                  messageId: message.id,
+                  conversationId: message.conversationId,
+                  code: 'NO_RECEIVER',
+                  reason: 'Could not resolve receiver ID',
+                })
+              );
+            }
+            break;
+          }
+
           const processedMessage: MessagePayload = {
             ...message,
             status: 'sent',
             createdAt: message.createdAt || new Date().toISOString(),
           };
 
-          // Store in in-memory conversation list
-          const convId = processedMessage.conversationId || (processedMessage.isGroup ? processedMessage.groupId : 'default');
+          const convId = processedMessage.conversationId;
           if (!conversationMessages.has(convId)) {
             conversationMessages.set(convId, []);
           }
-          conversationMessages.get(convId)!.push(processedMessage);
+          const list = conversationMessages.get(convId)!;
+          if (!list.some((m) => m.id === processedMessage.id)) {
+            list.push(processedMessage);
+            if (list.length > 500) list.shift();
+          }
 
-          // Acknowledge sender that message reached server ('sent' status with single tick)
-          ws.send(
-            JSON.stringify({
-              type: 'message:ack',
-              messageId: processedMessage.id,
-              conversationId: processedMessage.conversationId,
-              status: 'sent',
-            })
-          );
+          // Acknowledge sender that message reached server
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: 'message:ack',
+                messageId: processedMessage.id,
+                conversationId: processedMessage.conversationId,
+                status: 'sent',
+              })
+            );
+          }
 
           // Check if receiver has blocked sender
           if (processedMessage.receiverId) {

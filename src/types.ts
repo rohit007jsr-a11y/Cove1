@@ -46,7 +46,7 @@ export interface ConversationParticipant {
   user_id: string;
 }
 
-export type MessageStatus = 'sending' | 'sent' | 'delivered' | 'read';
+export type MessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
 export type MessageType = 'text' | 'image' | 'video' | 'document' | 'voice' | 'voice_note' | 'file' | 'system';
 
 export interface GroupSettings {

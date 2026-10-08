@@ -1195,6 +1195,51 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     }
   };
 
+  const handleRetryMessage = async (msg: Message) => {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === msg.id ? { ...m, status: 'sending' } : m))
+    );
+
+    await realtimeChat.ensureConnected(3000);
+    const sendResult = msg.is_group
+      ? realtimeChat.sendGroupMessage(msg)
+      : realtimeChat.sendMessage(msg);
+
+    if (sendResult === 'failed') {
+      try {
+        const res = await fetch('/api/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: {
+              id: msg.id,
+              conversationId: msg.conversation_id,
+              senderId: msg.sender_id,
+              receiverId: msg.receiver_id,
+              groupId: msg.group_id,
+              isGroup: msg.is_group,
+              content: msg.content,
+              type: msg.type,
+              mediaUrl: msg.media_url,
+              createdAt: msg.created_at,
+            },
+          }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        setMessages((prev) =>
+          prev.map((m) => (m.id === msg.id ? { ...m, status: 'sent' } : m))
+        );
+        idbRemovePendingMessage(msg.id).catch(() => {});
+      } catch (err) {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === msg.id ? { ...m, status: 'failed' } : m))
+        );
+        idbSavePendingMessage(msg).catch(() => {});
+        showToast('error', 'Retry Failed', 'Could not send message.');
+      }
+    }
+  };
+
   const handleSendMessage = async (
     text: string,
     type: any = 'text',
@@ -1265,12 +1310,12 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       idbSaveMessage(newMsg).catch((err) => console.warn('idbSaveMessage note:', err));
 
       // 3. Fast WebSocket send
-      let sentSuccess = false;
+      let sendResult: 'sent' | 'queued' | 'failed' = 'failed';
       if (isOnline) {
-        sentSuccess = realtimeChat.sendGroupMessage(newMsg);
+        sendResult = realtimeChat.sendGroupMessage(newMsg);
       }
 
-      if (!sentSuccess) {
+      if (sendResult === 'failed') {
         // Immediate HTTP REST API fallback
         fetch('/api/messages', {
           method: 'POST',
@@ -1365,12 +1410,12 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     idbSaveMessage(newMsg).catch((err) => console.warn('idbSaveMessage note:', err));
 
     // 3. Fast WebSocket send
-    let sentSuccess = false;
+    let sendResult: 'sent' | 'queued' | 'failed' = 'failed';
     if (isOnline) {
-      sentSuccess = realtimeChat.sendMessage(newMsg);
+      sendResult = realtimeChat.sendMessage(newMsg);
     }
 
-    if (!sentSuccess) {
+    if (sendResult === 'failed') {
       // Immediate HTTP REST fallback
       fetch('/api/messages', {
         method: 'POST',
@@ -2104,6 +2149,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                           onForward={handleOpenForwardModal}
                           onDelete={handleDeleteMessage}
                           onJumpToMessage={handleJumpToMessage}
+                          onRetry={handleRetryMessage}
                           onReply={(replyMsg) => {
                             setReplyingTo({
                               id: replyMsg.id,
